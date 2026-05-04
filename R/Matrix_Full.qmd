@@ -1,0 +1,90 @@
+---
+title: "Matrix_Full"
+format: pdf
+---
+
+# Matrix-Variate Normal Distribution
+
+- n is the number of subjects
+- r is the number of occasions (time points)
+- p is the number of attributes
+
+$$
+\phi_{r\times p}(\mathbf{X} | \mathbf{M}, \mathbf{V}, \mathbf{U}) = \frac{1}{(2\pi)^{\frac{rp}{2}}|\mathbf{V}|^{\frac{r}{2}}|\mathbf{U}|^{\frac{p}{2}}} \exp \left\{-\frac{1}{2}\text{tr}\left(\mathbf{V}^{-1}(\mathbf{X}-\mathbf{M})^\top\mathbf{U}^{-1}(\mathbf{X}-\mathbf{M})\right) \right\}
+$$
+
+- M is a r x p mean matrix
+- U is a r x r column covariance matrix
+- V is a p x p column row covariance matrix
+
+Note 1: that there is an identifiability issue with regard to U and V. If $k$ is a strictly positive constant, that replacing U and V by $(1/k)\mathbf{U}$ and $k\mathbf{V}$ respectively, leaves the distribution unchanged. Solutions have been proposed including setting $\text{tr}(\mathbf{U}) = r$ or $\mathbf{U}_{11} = 1$.
+
+$$
+\frac{1}{k}\mathbf{V} \otimes k\mathbf{U} = \mathbf{V} \otimes \mathbf{U}, \qquad \text{if} \ k >0
+$$
+
+Note 2: that the matrix-variate normal distribution is related to the multivariate normal distribution via the equivalence
+
+$$
+\mathbf{X} \sim \mathcal{N}_{r\times p} (\mathbf{M}, \mathbf{U}, \mathbf{V}) \iff \text{vec}({\mathbf{X}}) \sim \mathcal{N}_{rp}(\text{vec}(\mathbf{M}), \mathbf{V} \otimes \mathbf{U})
+$$
+
+## EM Updates
+
+Let $z_{ig} = 1$ when observation $i$ belongs in group $g$, and $z_{ig} = 0$ else. Then, in the E-step we estimate the posterior $\hat{z}_{ig}$ that observation $\mathbf{X}_i$ belongs to group $g$
+
+$$
+\hat{z}_{ig} = \frac{\hat\pi_g\phi_{r\times p}\left(\mathbf{X}_i|\hat{\mathbf{M}}_g,\hat{\mathbf{V}}_g, \hat{\mathbf{U}}_g\right)}{\sum_{h=1}^G\pi_h\phi_{r\times p}\left(\mathbf{X}_i|\hat{\mathbf{M}}_h, \hat{\mathbf{V}}_h, \hat{\mathbf{U}}_h\right)}
+$$
+
+In M-step we get the maximum likelihood estimates:
+
+$$
+\begin{align}
+
+\hat\pi_g &= \frac{1}{n}\sum_{i=1}^n\hat{z}_{ig} \\
+
+\hat{\mathbf{M}}_g &= \frac{1}{\sum_{i=1}^n\hat{z}_{ig}}\sum_{i=1}^n\hat{z}_{ig}\mathbf{X}_i \\
+
+\hat{\mathbf{U}}_g &= \frac{1}{p\sum_{i=1}^n\hat{z}_{ig}}\sum_{i=1}^n\hat{z}_{ig}(\mathbf{X}_i - \hat{\mathbf{M}}_g)\hat{\mathbf{V}}_g^{-1}(\mathbf{X}_i - \hat{\mathbf{M}}_g)^\top \\
+
+\hat{\mathbf{V}}_g &= \frac{1}{r\sum_{i=1}^n\hat{z}_{ig}}\sum_{i=1}^n\hat{z}_{ig}(\mathbf{X}_i - \hat{\mathbf{M}}_g)^\top\hat{\mathbf{U}}_g^{-1}(\mathbf{X}_i - \hat{\mathbf{M}}_g)
+
+\end{align}
+$$
+
+We can initialize $\hat{z}_{ig}$ using k-means. Meaning we define the Mahalonobis distance as
+
+$$
+\mathcal{D}_M(\mathbf{X}_i, \mathbf{M}, \mathbf{V}, \mathbf{U}) = \text{tr}\left\{\mathbf{U}^{-1}(\mathbf{X}_i - \mathbf{M})\mathbf{V^{-1}(\mathbf{X}_i - \mathbf{M})^\top} \right\}
+$$
+
+These will form as the foundation for our base Matrix Gaussian Mixture Model (MGMM) updates. Let us try putting that into a function!
+
+## Code
+
+```{r}
+#| label: libraries
+#| message: false
+#| warning: false
+#| include: false
+
+library(dplyr)
+```
+
+```{r}
+#| label: Mahalonbis_D
+#| warning: false
+#| message: false
+
+
+```
+
+```{r}
+#| label: MGMM
+#| warning: false
+#| message: false
+
+
+```
+
