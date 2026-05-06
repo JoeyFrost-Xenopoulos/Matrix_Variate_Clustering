@@ -91,9 +91,6 @@ library(dplyr)
 
 # Compute matrix-variate Mahalanobis distance
 matrix_mahalanobis <- function(x, mean_matrix, row_cov, col_cov) {
-	row_cov <- (row_cov + t(row_cov)) / 2
-	col_cov <- (col_cov + t(col_cov)) / 2
-
 	# U^{-1} and V^{-1}
 	row_chol <- chol(row_cov)
 	col_chol <- chol(col_cov)
@@ -145,11 +142,9 @@ matrix_mixture_kmeans_init <- function(x_list, g, nstart = 10) {
 		row_cov <- row_cov / (p * length(component_data))
 		col_cov <- col_cov / (r * length(component_data))
 
-		# Regularize
-		row_covariances[[component]] <- (row_cov + t(row_cov)) / 2
-		col_covariances[[component]] <- (col_cov + t(col_cov)) / 2
-
 		# Enforce identifiability scale so that tr(U) = r
+		row_covariances[[component]] <- row_cov
+		col_covariances[[component]] <- col_cov
 		row_scale <- r / sum(diag(row_covariances[[component]]))
 		row_covariances[[component]] <- row_covariances[[component]] * row_scale
 		col_covariances[[component]] <- col_covariances[[component]] / row_scale
@@ -176,9 +171,6 @@ matrix_mixture_kmeans_init <- function(x_list, g, nstart = 10) {
 
 # Compute log-density of single matrix under matrix-variate normal
 matrix_variate_log_density <- function(x, mean_matrix, row_cov, col_cov) {
-	row_cov <- (row_cov + t(row_cov)) / 2
-	col_cov <- (col_cov + t(col_cov)) / 2
-
 	# Cholesky decomposition
 	row_chol <- chol(row_cov)
 	col_chol <- chol(col_cov)
@@ -287,8 +279,6 @@ matrix_variate_mixture_fit <- function(x_list, g, max_iter = 100, tol = 1e-06,
 				row_cov <- row_cov + weights[i] * (centered %*% solve(params$V[[component]], t(centered)))
 			}
 			row_cov <- row_cov / (p * weights_sum)
-			# Regularize
-			row_cov <- (row_cov + t(row_cov)) / 2 + diag(nrow(row_cov))
 			
 			# Enforce tr(U) = r
 			row_scale <- r / sum(diag(row_cov))
@@ -301,8 +291,6 @@ matrix_variate_mixture_fit <- function(x_list, g, max_iter = 100, tol = 1e-06,
 				col_cov <- col_cov + weights[i] * (t(centered) %*% solve(row_cov, centered))
 			}
 			col_cov <- col_cov / (r * weights_sum)
-			# Regularize
-			col_cov <- (col_cov + t(col_cov)) / 2 + diag(nrow(col_cov))
 
 			# Store updated parameters
 			new_params$pi[component] <- weights_sum / n  # mixing proportion
@@ -376,5 +364,20 @@ fit$cluster
 fit$pi
 fit$logLik
 
+# Quick diagnostics:
+# 1. The log-likelihood should generally increase across iterations.
+# 2. The fitted clusters should separate the two simulated groups.
+# 3. The component mean matrices should reflect the positive/negative pattern we simulated.
+
+true_labels <- rep(1:2, each = 15)
+pred_labels <- fit$cluster
+
+accuracy_1 <- mean(pred_labels == true_labels)
+accuracy_2 <- mean((3 - pred_labels) == true_labels)
+best_accuracy <- max(accuracy_1, accuracy_2)
+aligned_labels <- if (accuracy_2 > accuracy_1) 3 - pred_labels else pred_labels
+
+best_accuracy
+table(True = true_labels, Predicted = aligned_labels)
 ```
 
