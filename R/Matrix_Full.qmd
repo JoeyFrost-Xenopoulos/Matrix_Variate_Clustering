@@ -8,7 +8,6 @@ We cluster the trends of measurements across time and group subjects with simila
 U row covariance asks do measurements at occasions change together? (Across time)
 V col covariance asks do measurements tend to change together? (Time flat)
 
-
 # Matrix-Variate Normal Distribution
 
 - n is the number of subjects
@@ -363,11 +362,6 @@ fit <- matrix_variate_mixture_fit(x_list = x_list, g = 2, max_iter = 50, verbose
 fit$cluster
 fit$pi
 fit$logLik
-
-# Quick diagnostics:
-# 1. The log-likelihood should generally increase across iterations.
-# 2. The fitted clusters should separate the two simulated groups.
-# 3. The component mean matrices should reflect the positive/negative pattern we simulated.
 
 true_labels <- rep(1:2, each = 15)
 pred_labels <- fit$cluster
