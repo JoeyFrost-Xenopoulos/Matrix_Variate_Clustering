@@ -327,6 +327,8 @@ matrix_variate_mixture_fit <- function(x_list, g, max_iter = 100, tol = 1e-06,
 
 ```
 
+## Testing the Model
+
 ```{r}
 #| label: fit_ex
 #| warning: false
@@ -373,5 +375,9 @@ aligned_labels <- if (accuracy_2 > accuracy_1) 3 - pred_labels else pred_labels
 
 best_accuracy
 table(True = true_labels, Predicted = aligned_labels)
+```
+
+```{r}
+
 ```
 
