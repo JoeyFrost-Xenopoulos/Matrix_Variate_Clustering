@@ -88,9 +88,26 @@ library(dplyr)
 #| warning: false
 #| message: false
 
+# Force a matrix to be symmetric positive definite for stable chol/solve
+make_spd <- function(mat, jitter = 1e-8, max_tries = 8) {
+	mat <- (mat + t(mat)) / 2
+	for (k in 0:max_tries) {
+		j <- jitter * (10^k)
+		candidate <- mat + diag(j, nrow(mat))
+		ok <- tryCatch({
+			chol(candidate)
+			TRUE
+		}, error = function(e) FALSE)
+		if (ok) return(candidate)
+	}
+	stop("Could not make covariance matrix positive definite.")
+}
+
 # Compute matrix-variate Mahalanobis distance
 matrix_mahalanobis <- function(x, mean_matrix, row_cov, col_cov) {
 	# U^{-1} and V^{-1}
+	row_cov <- make_spd(row_cov)
+	col_cov <- make_spd(col_cov)
 	row_chol <- chol(row_cov)
 	col_chol <- chol(col_cov)
 	centered <- x - mean_matrix
@@ -140,6 +157,8 @@ matrix_mixture_kmeans_init <- function(x_list, g, nstart = 10) {
 		
 		row_cov <- row_cov / (p * length(component_data))
 		col_cov <- col_cov / (r * length(component_data))
+		row_cov <- make_spd(row_cov)
+		col_cov <- make_spd(col_cov)
 
 		# Enforce identifiability scale so that tr(U) = r
 		row_covariances[[component]] <- row_cov
@@ -147,6 +166,8 @@ matrix_mixture_kmeans_init <- function(x_list, g, nstart = 10) {
 		row_scale <- r / sum(diag(row_covariances[[component]]))
 		row_covariances[[component]] <- row_covariances[[component]] * row_scale
 		col_covariances[[component]] <- col_covariances[[component]] / row_scale
+		row_covariances[[component]] <- make_spd(row_covariances[[component]])
+		col_covariances[[component]] <- make_spd(col_covariances[[component]])
 	}
 
 	list(
@@ -171,6 +192,8 @@ matrix_mixture_kmeans_init <- function(x_list, g, nstart = 10) {
 # Compute log-density of single matrix under matrix-variate normal
 matrix_variate_log_density <- function(x, mean_matrix, row_cov, col_cov) {
 	# Cholesky decomposition
+	row_cov <- make_spd(row_cov)
+	col_cov <- make_spd(col_cov)
 	row_chol <- chol(row_cov)
 	col_chol <- chol(col_cov)
 
@@ -263,6 +286,7 @@ matrix_variate_mixture_fit <- function(x_list, g, max_iter = 100, tol = 1e-06,
 
 			weights <- responsibilities[, component]
 			weights_sum <- component_sizes[component]  # effective sample size for this component
+			v_for_row <- make_spd(params$V[[component]])
 
 			# Update mean matrix (M-step: M_hat_g)
 			mean_matrix <- matrix(0, r, p)
@@ -275,13 +299,15 @@ matrix_variate_mixture_fit <- function(x_list, g, max_iter = 100, tol = 1e-06,
 			row_cov <- matrix(0, r, r)
 			for (i in seq_len(n)) {
 				centered <- x_list[[i]] - mean_matrix
-				row_cov <- row_cov + weights[i] * (centered %*% solve(params$V[[component]], t(centered)))
+				row_cov <- row_cov + weights[i] * (centered %*% solve(v_for_row, t(centered)))
 			}
 			row_cov <- row_cov / (p * weights_sum)
+			row_cov <- make_spd(row_cov)
 			
 			# Enforce tr(U) = r
 			row_scale <- r / sum(diag(row_cov))
 			row_cov <- row_cov * row_scale
+			row_cov <- make_spd(row_cov)
 
 			# Update column covariance V_hat_g
 			col_cov <- matrix(0, p, p)
@@ -290,6 +316,7 @@ matrix_variate_mixture_fit <- function(x_list, g, max_iter = 100, tol = 1e-06,
 				col_cov <- col_cov + weights[i] * (t(centered) %*% solve(row_cov, centered))
 			}
 			col_cov <- col_cov / (r * weights_sum)
+			col_cov <- make_spd(col_cov)
 
 			# Store updated parameters
 			new_params$pi[component] <- weights_sum / n  # mixing proportion
@@ -377,7 +404,201 @@ best_accuracy
 table(True = true_labels, Predicted = aligned_labels)
 ```
 
+## In the Style of Viroli
+
 ```{r}
+#| label: viroli_simulation_setup
+#| warning: false
+#| message: false
+
+library(clusterGeneration)
+
+generate_viroli_means <- function() {
+	# M1: (a, b) = (0.5, 0.5)
+	M1 <- matrix(0, nrow = 3, ncol = 5)
+	M1[1, 1] <- 0.5  # a
+	M1[2, 1] <- 0.5  # b
+	
+	# M2: (a, b) = (0, 0)
+	M2 <- matrix(0, nrow = 3, ncol = 5)
+	
+	# M3: (a, b) = (-0.5, 0.5)
+	M3 <- matrix(0, nrow = 3, ncol = 5)
+	M3[1, 1] <- -0.5  # a
+	M3[2, 1] <- 0.5   # b
+	
+	list(M1 = M1, M2 = M2, M3 = M3)
+}
+
+# Function to generate random correlation matrices using clusterGeneration
+generate_random_corrmatrix <- function(p, seed = NULL) {
+	if (!is.null(seed)) set.seed(seed)
+	# rcorrmatrix generates random correlation matrices
+	make_spd(rcorrmatrix(p))
+}
+
+# Function to generate a single Viroli dataset
+generate_viroli_dataset <- function(n = 300, means_list, U_list, V_list, 
+                                    group_props = c(0.3, 0.4, 0.3),
+                                    seed = NULL) {
+	if (!is.null(seed)) set.seed(seed)
+	
+	# Generate group assignments
+	group_sizes <- as.numeric(table(sample(rep(1:3, times = round(n * group_props)),
+	                                        size = n)))
+	groups <- rep(1:3, times = group_sizes)
+	
+	# List to store all matrices and their group labels
+	X_list <- list()
+	group_labels <- numeric(n)
+	
+	idx <- 1
+	for (g in 1:3) {
+		n_g <- group_sizes[g]
+		U_g <- make_spd(U_list[[g]])
+		V_g <- make_spd(V_list[[g]])
+		chol_U <- chol(U_g)
+		chol_V <- chol(V_g)
+		for (i in 1:n_g) {
+			# Generate random noise from matrix variate normal
+			Z <- matrix(rnorm(3 * 5), nrow = 3, ncol = 5)
+			
+			# X_ig ~ N_{3x5}(M_g, U_g, V_g)
+			# Equivalent to: X_ig = M_g + U_g^{1/2} * Z * V_g^{1/2}
+			X_matrix <- means_list[[g]] + t(chol_U) %*% Z %*% chol_V
+			X_list[[idx]] <- X_matrix
+			group_labels[idx] <- g
+			idx <- idx + 1
+		}
+	}
+	
+	list(X = X_list, true_groups = group_labels, group_sizes = group_sizes)
+}
+
+# Function to run a complete Viroli simulation with N_sim datasets
+run_viroli_simulation <- function(N_sim = 100, n = 300, g = 3, 
+                                  verbose = TRUE) {
+	
+	# Generate the mean matrices
+	means_list <- generate_viroli_means()
+	means_components <- list(means_list$M1, means_list$M2, means_list$M3)
+	
+	# Generate covariance matrices (fixed for all simulations for reproducibility)
+	set.seed(1234)
+	U_list <- lapply(1:3, function(g) generate_random_corrmatrix(3))
+	V_list <- lapply(1:3, function(g) generate_random_corrmatrix(5))
+	
+	# Lists to store results from each dataset
+	all_accuracies <- numeric(N_sim)
+	all_confusion_matrices <- list()
+	all_fits <- list()
+	
+	# Run simulation
+	for (sim in 1:N_sim) {
+		if (verbose && sim %% 10 == 0) {
+			cat(sprintf("Simulation %d/%d\n", sim, N_sim))
+		}
+		
+		# Generate dataset
+		dataset <- generate_viroli_dataset(
+			n = n,
+			means_list = means_components,
+			U_list = U_list,
+			V_list = V_list,
+			seed = sim + 5000  # Different seed for each simulation
+		)
+		
+		# Fit the model
+		fit <- matrix_variate_mixture_fit(
+			x_list = dataset$X,
+			g = g,
+			max_iter = 100,
+			tol = 1e-6,
+			verbose = FALSE
+		)
+		
+		# Compute accuracy (accounting for label switching)
+		pred_labels <- fit$cluster
+		true_labels <- dataset$true_groups
+		
+		# Check both original and swapped label permutations
+		# For 3 groups, we need to check all 3! = 6 permutations
+		permutations <- list(
+			c(1, 2, 3), c(1, 3, 2), c(2, 1, 3),
+			c(2, 3, 1), c(3, 1, 2), c(3, 2, 1)
+		)
+		
+		accuracies <- numeric(6)
+		for (perm_idx in 1:6) {
+			perm <- permutations[[perm_idx]]
+			relabeled <- perm[pred_labels]
+			accuracies[perm_idx] <- mean(relabeled == true_labels)
+		}
+		
+		best_accuracy <- max(accuracies)
+		best_perm <- permutations[[which.max(accuracies)]]
+		aligned_labels <- best_perm[pred_labels]
+		
+		all_accuracies[sim] <- best_accuracy
+		all_confusion_matrices[[sim]] <- table(True = true_labels, 
+		                                        Predicted = aligned_labels)
+		all_fits[[sim]] <- fit
+	}
+	
+	list(
+		accuracies = all_accuracies,
+		mean_accuracy = mean(all_accuracies),
+		sd_accuracy = sd(all_accuracies),
+		min_accuracy = min(all_accuracies),
+		max_accuracy = max(all_accuracies),
+		confusion_matrices = all_confusion_matrices,
+		fits = all_fits,
+		means = means_components,
+		U_covariances = U_list,
+		V_covariances = V_list
+	)
+}
+
+```
+
+### Running the Viroli Simulation Study
+
+```{r}
+#| label: viroli_run_simulation
+#| warning: false
+#| message: false
+
+set.seed(7)
+viroli_sim_results <- run_viroli_simulation(N_sim = 100, n = 300, g = 3, 
+                                            verbose = FALSE)
+
+cat("ACCURACY METRICS:\n")
+paste("Mean accuracy: %:", viroli_sim_results$mean_accuracy)
+paste("SD accuracy: %:", viroli_sim_results$sd_accuracy)
+paste("Min accuracy: %:", viroli_sim_results$min_accuracy)
+paste("Max accuracy: %:", viroli_sim_results$max_accuracy)
+cat(sprintf("95%% CI: [%.4f, %.4f]\n", 
+    quantile(viroli_sim_results$accuracies, 0.025),
+    quantile(viroli_sim_results$accuracies, 0.975)))
+```
+
+### Summary Statistics by Simulation
+
+```{r}
+#| label: viroli_summary_table
+#| warning: false
+#| message: false
+
+summary_df <- data.frame(
+	Simulation = 1:100,
+	Accuracy = viroli_sim_results$accuracies,
+	Status = ifelse(viroli_sim_results$accuracies >= 0.9, 
+	                "High", 
+	                ifelse(viroli_sim_results$accuracies >= 0.7, "Good", "Fair"))
+)
+
+print(head(summary_df[order(-summary_df$Accuracy), ], 10))
+print(head(summary_df[order(summary_df$Accuracy), ], 10))
 
 ```
 
