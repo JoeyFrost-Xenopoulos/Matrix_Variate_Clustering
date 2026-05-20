@@ -34,6 +34,11 @@ $$
 \mathbf{X} \sim \mathcal{N}_{r\times p} (\mathbf{M}, \mathbf{U}, \mathbf{V}) \iff \text{vec}({\mathbf{X}}) \sim \mathcal{N}_{rp}(\text{vec}(\mathbf{M}), \mathbf{V} \otimes \mathbf{U})
 $$
 
+The log-likelihood is defined as
+$$
+-\frac{1}{2}(rp\log(2\pi) + r\log|\mathbf{V}|+p\log|\mathbf{U}| + \text{tr}[\mathbf{V}^{-1}(\mathbf{X}-\mathbf{M})^\top\mathbf{U}^{-1}(\mathbf{X}-\mathbf{M})])
+$$
+
 ## EM Updates
 
 Let $z_{ig} = 1$ when observation $i$ belongs in group $g$, and $z_{ig} = 0$ else. Then, in the E-step we estimate the posterior $\hat{z}_{ig}$ that observation $\mathbf{X}_i$ belongs to group $g$
@@ -575,7 +580,7 @@ run_viroli_simulation <- function(N_sim = 100, n = 300, g = 3,
 #| warning: false
 #| message: false
 
-viroli_sim_results <- run_viroli_simulation(N_sim = 100, n = 300, g = 3, 
+viroli_sim_results <- run_viroli_simulation(N_sim = 1, n = 300, g = 3, 
                                             verbose = TRUE)
 ```
 
