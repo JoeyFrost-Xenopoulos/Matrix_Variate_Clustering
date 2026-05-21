@@ -676,3 +676,13 @@ final_noise_summary <- rbind(
 
 final_noise_summary
 ```
+
+HC assumes a simple, element-wise “improper constant k” noise model and treats many individual matrix entries as independent outliers.
+Viroli data are clustering by more complex matrix structure (multiple groups, 3×5 matrices, covariance/structural differences and subtle mean shifts), so natural between-group variability looks like element-level noise to HC.
+The contamination used for Viroli (randomly permuting entries in whole matrices) is structured, not just extreme single-entry outliers; HC’s element-wise constant-noise assumption fails to model that, so it either (a) flags too many entries as noise (high mean_noise_rate) or (b) collapses cluster structure—both reduce ARI.
+
+
+(I think this is where the optimized k-finder would be helpful. I guess we could try multiple k's and go from there but whatever.)
+Make HC more informative/regularized (tighter prior on k) so it doesn’t absorb structured signal.
+Model noise at the matrix level (treat whole matrices as contaminated) or add a structured noise component that can capture permutations.
+Increase sample size or use feature-level transforms that remove uninformative variability (e.g., low-rank projection) before applying HC.
