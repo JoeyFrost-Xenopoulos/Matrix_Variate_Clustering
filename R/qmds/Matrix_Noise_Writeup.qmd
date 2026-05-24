@@ -68,19 +68,19 @@ and define the axis-aligned hyper-rectangle
 $$
 R = \prod_{a=1}^r\prod_{b=1}^p [m_{ab}, M_{ab}] \subset \mathbb{R}^{rp}
 $$
-Then set the uniform noise density
+Then set the uniform noise density over the convex hull of the vectorized observations
 
 $$
-h_{\mathrm{BR}}^{\mathrm{box}}(\mathbf{X}) = \frac{1(\mathrm{vec}(\mathbf{X})\in R)}{\prod_{a,b}(M_{ab}-m_{ab})}
+h_{\mathrm{BR}}^{\mathrm{hull}}(\mathbf{X}) = \frac{1(\mathrm{vec}(\mathbf{X})\in \mathrm{conv}(\{\mathrm{vec}(\mathbf{X}_i)\}))}{\mathrm{vol}(\mathrm{conv}(\{\mathrm{vec}(\mathbf{X}_i)\}))}
 $$
 
 ## Code
 
 The implementation is centered on one fitting function that takes the list of matrices, the number of Gaussian clusters, and a `noise_type` flag. It first checks that every element of `x_list` has the same dimensions, then uses k-means initialization on the vectorized matrices to get starting values for the Gaussian components.
 
-Inside the EM loop, the code builds a log-density matrix with one column per Gaussian component plus one extra column for noise. The Gaussian columns use the matrix-variate log-density, while the noise column is handled separately: HC fills that column with the constant value `log(k)`, and BR precomputes a bounding box for the observed matrices and assigns a uniform log-density of `-log(volume)` for matrices inside the box and `-Inf` otherwise.
+Inside the EM loop, the code builds a log-density matrix with one column per Gaussian component plus one extra column for noise. The Gaussian columns use the matrix-variate log-density, while the noise column is handled separately: HC fills that column with the constant value `log(k)`, and BR vectorizes the observed matrices, computes their convex hull, and assigns a uniform log-density of `-log(volume)` for matrices inside the hull and `-Inf` otherwise.
 
 After the log-densities are assembled, the code normalizes each row with a log-sum-exp step to get posterior responsibilities. The M-step then updates only the Gaussian parameters and the component mixing proportions using those responsibilities, while the noise component keeps its fixed density form and only its mixing weight is updated. Hard cluster labels are taken from the maximum posterior responsibility, with noise observations mapped to `0`.
 
-The BR helper functions are deliberately small: one function computes the entrywise lower and upper bounds and the box volume, and another evaluates whether each matrix lies inside that box. That keeps the noise logic separate from the Gaussian updates and makes the BR case easy to swap in without changing the rest of the EM routine.
+The BR helper functions are deliberately small: one function computes the convex hull and its volume from the vectorized matrices, and another evaluates whether each matrix lies inside that hull. That keeps the noise logic separate from the Gaussian updates and makes the BR case easy to swap in without changing the rest of the EM routine.
 
