@@ -85,6 +85,9 @@ matrix_variate_noise_fit <- function(x_list, g,
 			for (candidate_k in round_grid) {
 				candidate_key <- format(candidate_k, scientific = TRUE, digits = 16)
 				seen_keys <- c(seen_keys, candidate_key)
+				if (verbose) {
+					message(sprintf("Checking HC noise_k = %.4e", candidate_k))
+				}
 				candidate_fit <- matrix_variate_noise_fit_impl(
 					x_list = x_list,
 					g = g,
@@ -410,7 +413,11 @@ matrix_variate_noise_fit_impl <- function(x_list, g,
 		params <- new_params
 
 		if (verbose) {
-			message(sprintf("Iteration %d: log-likelihood = %.4f", iteration, current_loglik))
+			if (noise_type == "hc") {
+				message(sprintf("Iteration %d: log-likelihood = %.4f | noise_k = %.4e", iteration, current_loglik, noise_k))
+			} else {
+				message(sprintf("Iteration %d: log-likelihood = %.4f | noise_type = %s", iteration, current_loglik, noise_type))
+			}
 		}
 	}
 
