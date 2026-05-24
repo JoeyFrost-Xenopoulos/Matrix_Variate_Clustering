@@ -16,7 +16,9 @@
 #'   search `noise_k_grid` and select the fit with the smallest matrix-KS
 #'   statistic on fitted Mahalanobis distances.
 #' @param noise_k_grid Numeric vector of candidate HC noise heights to try when
-#'   `select_noise_k = TRUE`.
+#'   `select_noise_k = TRUE`. The search also augments this grid with a
+#'   matrix-dimension-aware log-scale heuristic so it can reach much smaller
+#'   densities when the data dimension grows.
 #' @param noise_jitter Numeric: retained for compatibility; unused by the BR
 #'   convex-hull support.
 #' @param noise_pi_init Numeric: initial mixing proportion for the noise
@@ -65,61 +67,103 @@ matrix_variate_noise_fit <- function(x_list, g,
 	}
 
 	if (noise_type == "hc" && isTRUE(select_noise_k)) {
-		candidate_grid <- unique(as.numeric(noise_k_grid))
-		candidate_grid <- candidate_grid[is.finite(candidate_grid) & candidate_grid > 0]
-		if (length(candidate_grid) == 0) {
-			stop("noise_k_grid must contain at least one positive finite value.")
-		}
-
-		search_results <- vector("list", length(candidate_grid))
+		candidate_grid <- matrix_noise_hc_search_grid(noise_k_grid = noise_k_grid, x_list = x_list)
+		search_results <- list()
 		best_fit <- NULL
 		best_k <- NA_real_
 		best_statistic <- Inf
 		best_p_value <- NA_real_
+		seen_keys <- character(0)
+		max_rounds <- 3L
 
-		for (idx in seq_along(candidate_grid)) {
-			candidate_k <- candidate_grid[idx]
-			candidate_fit <- matrix_variate_noise_fit_impl(
-				x_list = x_list,
-				g = g,
-				noise_type = noise_type,
-				max_iter = max_iter,
-				tol = tol,
-				nstart = nstart,
-				noise_k = candidate_k,
-				noise_jitter = noise_jitter,
-				noise_pi_init = noise_pi_init,
-				verbose = verbose
-			)
-			score <- matrix_noise_ks_score(candidate_fit, x_list)
-			search_results[[idx]] <- data.frame(
-				noise_k = candidate_k,
-				ks_statistic = score$statistic,
-				ks_p_value = score$p.value,
-				n_used = score$n_used,
-				logLik = if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_,
-				converged = candidate_fit$converged
-			)
-
-			if (is.finite(score$statistic) && (
-				score$statistic < best_statistic ||
-				(identical(score$statistic, best_statistic) && (!is.finite(best_p_value) || score$p.value > best_p_value))
-			)) {
-				best_fit <- candidate_fit
-				best_k <- candidate_k
-				best_statistic <- score$statistic
-				best_p_value <- score$p.value
+		for (round_idx in seq_len(max_rounds)) {
+			round_grid <- candidate_grid[!(format(candidate_grid, scientific = TRUE, digits = 16) %in% seen_keys)]
+			if (length(round_grid) == 0) {
+				break
 			}
-		}
 
-		if (is.null(best_fit)) {
-			stop("No HC noise_k candidate produced enough non-noise distances for a KS score.")
+			for (candidate_k in round_grid) {
+				candidate_key <- format(candidate_k, scientific = TRUE, digits = 16)
+				seen_keys <- c(seen_keys, candidate_key)
+				candidate_fit <- matrix_variate_noise_fit_impl(
+					x_list = x_list,
+					g = g,
+					noise_type = noise_type,
+					max_iter = max_iter,
+					tol = tol,
+					nstart = nstart,
+					noise_k = candidate_k,
+					noise_jitter = noise_jitter,
+					noise_pi_init = noise_pi_init,
+					verbose = verbose
+				)
+				score <- matrix_noise_ks_score(candidate_fit, x_list)
+				search_results[[length(search_results) + 1L]] <- data.frame(
+					round = round_idx,
+					noise_k = candidate_k,
+					ks_statistic = score$statistic,
+					ks_p_value = score$p.value,
+					n_used = score$n_used,
+					logLik = if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_,
+					converged = candidate_fit$converged,
+					stringsAsFactors = FALSE
+				)
+
+				if (is.finite(score$statistic) && (
+					score$statistic < best_statistic ||
+					(identical(score$statistic, best_statistic) && (!is.finite(best_p_value) || score$p.value > best_p_value))
+				)) {
+					best_fit <- candidate_fit
+					best_k <- candidate_k
+					best_statistic <- score$statistic
+					best_p_value <- score$p.value
+				}
+			}
+
+			if (is.null(best_fit)) {
+				stop("No HC noise_k candidate produced enough non-noise distances for a KS score.")
+			}
+
+			current_min <- min(candidate_grid)
+			current_max <- max(candidate_grid)
+			current_span <- diff(range(log10(candidate_grid)))
+			if (!is.finite(current_span) || current_span <= 0) {
+				current_span <- 1
+			}
+
+			if (best_k > current_min && best_k < current_max) {
+				break
+			}
+
+			if (round_idx >= max_rounds) {
+				break
+			}
+
+			if (identical(best_k, current_min)) {
+				lower_log10 <- log10(current_min) - current_span
+				upper_log10 <- log10(current_min)
+				candidate_grid <- sort(unique(c(
+					candidate_grid,
+					10^seq(lower_log10, upper_log10, length.out = max(9L, length(candidate_grid)))
+				)))
+			} else if (identical(best_k, current_max)) {
+				lower_log10 <- log10(current_max)
+				upper_log10 <- log10(current_max) + current_span
+				candidate_grid <- sort(unique(c(
+					candidate_grid,
+					10^seq(lower_log10, upper_log10, length.out = max(9L, length(candidate_grid)))
+				)))
+			} else {
+				break
+			}
+
+			candidate_grid <- candidate_grid[is.finite(candidate_grid) & candidate_grid > 0]
 		}
 
 		best_fit$noise$search <- list(
 			enabled = TRUE,
 			criterion = "matrix_ks",
-			grid = candidate_grid,
+			grid = sort(unique(candidate_grid)),
 			results = do.call(rbind, search_results),
 			selected_k = best_k,
 			ks_statistic = best_statistic,
@@ -188,6 +232,34 @@ matrix_noise_ks_score <- function(fit, x_list) {
 		p.value = unname(test$p.value),
 		n_used = length(distances)
 	)
+}
+
+#' Build an HC Noise Search Grid
+#'
+#' @param noise_k_grid Candidate HC noise heights supplied by the caller.
+#' @param x_list List of matrices used to infer a dimension-aware heuristic.
+#'
+#' @return A sorted unique numeric vector of positive candidate noise heights.
+#'
+#' @keywords internal
+matrix_noise_hc_search_grid <- function(noise_k_grid, x_list) {
+	candidate_grid <- unique(as.numeric(noise_k_grid))
+	candidate_grid <- candidate_grid[is.finite(candidate_grid) & candidate_grid > 0]
+	if (length(candidate_grid) == 0) {
+		stop("noise_k_grid must contain at least one positive finite value.")
+	}
+
+	dimension <- nrow(x_list[[1]]) * ncol(x_list[[1]])
+	if (is.finite(dimension) && dimension > 0) {
+		center_log10 <- -0.75 * dimension
+		half_width <- max(6, ceiling(dimension / 2))
+		lower_log10 <- max(log10(.Machine$double.xmin), center_log10 - half_width)
+		upper_log10 <- center_log10 + half_width
+		heuristic_grid <- 10^seq(lower_log10, upper_log10, length.out = max(9L, length(candidate_grid)))
+		candidate_grid <- c(candidate_grid, heuristic_grid)
+	}
+
+	sort(unique(candidate_grid))
 }
 
 matrix_variate_noise_fit_impl <- function(x_list, g,

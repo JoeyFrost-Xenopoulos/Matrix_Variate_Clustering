@@ -7,7 +7,7 @@ format: html
 
 ```{r}
 set.seed(123)
-r <- 3; p <- 4
+r <- 10; p <- 12
 simulate_group <- function(n, mean_matrix, row_sd = 0.5, col_sd = 0.5) {
 	row_cov <- diag(row_sd, nrow(mean_matrix))
 	col_cov <- diag(col_sd, ncol(mean_matrix))
@@ -26,7 +26,7 @@ x_list <- c(x_list, contam)
 ### HC-noise
 
 ```{r}
-fit_hc <- matrix_variate_noise_fit(x_list, g = 2, noise_type = "hc", select_noise_k = TRUE,
+fit_hc <- matrix_variate_noise_fit(x_list, g = 2, noise_type = "hc", noise_k = 1e-130,
                                    nstart = 100, max_iter = 50, verbose = TRUE)
 
 cat('HC fit mixing proportions:\n')
