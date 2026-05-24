@@ -12,6 +12,11 @@
 #' @param tol Numeric: convergence tolerance on the log-likelihood trace.
 #' @param nstart Integer: number of k-means restarts for initialization.
 #' @param noise_k Numeric: constant noise height used when `noise_type = "hc"`.
+#' @param select_noise_k Logical: if `TRUE` and `noise_type = "hc"`, grid
+#'   search `noise_k_grid` and select the fit with the smallest matrix-KS
+#'   statistic on fitted Mahalanobis distances.
+#' @param noise_k_grid Numeric vector of candidate HC noise heights to try when
+#'   `select_noise_k = TRUE`.
 #' @param noise_jitter Numeric: retained for compatibility; unused by the BR
 #'   convex-hull support.
 #' @param noise_pi_init Numeric: initial mixing proportion for the noise
@@ -43,14 +48,157 @@
 #'
 #' @export
 matrix_variate_noise_fit <- function(x_list, g,
-										 noise_type = c("hc", "br"),
-										 max_iter = 100,
-										 tol = 1e-06,
-										 nstart = 10,
-										 noise_k = 1e-04,
-										 noise_jitter = 1e-08,
-										 noise_pi_init = 0.05,
-										 verbose = FALSE) {
+											 noise_type = c("hc", "br"),
+											 max_iter = 1000,
+											 tol = 1e-06,
+											 nstart = 10,
+											 noise_k = 1e-04,
+											 select_noise_k = FALSE,
+											 noise_k_grid = 10^seq(-8, -1, length.out = 15),
+											 noise_jitter = 1e-08,
+											 noise_pi_init = 0.05,
+											 verbose = FALSE) {
+	noise_type <- match.arg(noise_type)
+
+	if (!is.list(x_list) || length(x_list) == 0) {
+		stop("x_list must be a non-empty list of matrices.")
+	}
+
+	if (noise_type == "hc" && isTRUE(select_noise_k)) {
+		candidate_grid <- unique(as.numeric(noise_k_grid))
+		candidate_grid <- candidate_grid[is.finite(candidate_grid) & candidate_grid > 0]
+		if (length(candidate_grid) == 0) {
+			stop("noise_k_grid must contain at least one positive finite value.")
+		}
+
+		search_results <- vector("list", length(candidate_grid))
+		best_fit <- NULL
+		best_k <- NA_real_
+		best_statistic <- Inf
+		best_p_value <- NA_real_
+
+		for (idx in seq_along(candidate_grid)) {
+			candidate_k <- candidate_grid[idx]
+			candidate_fit <- matrix_variate_noise_fit_impl(
+				x_list = x_list,
+				g = g,
+				noise_type = noise_type,
+				max_iter = max_iter,
+				tol = tol,
+				nstart = nstart,
+				noise_k = candidate_k,
+				noise_jitter = noise_jitter,
+				noise_pi_init = noise_pi_init,
+				verbose = verbose
+			)
+			score <- matrix_noise_ks_score(candidate_fit, x_list)
+			search_results[[idx]] <- data.frame(
+				noise_k = candidate_k,
+				ks_statistic = score$statistic,
+				ks_p_value = score$p.value,
+				n_used = score$n_used,
+				logLik = if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_,
+				converged = candidate_fit$converged
+			)
+
+			if (is.finite(score$statistic) && (
+				score$statistic < best_statistic ||
+				(identical(score$statistic, best_statistic) && (!is.finite(best_p_value) || score$p.value > best_p_value))
+			)) {
+				best_fit <- candidate_fit
+				best_k <- candidate_k
+				best_statistic <- score$statistic
+				best_p_value <- score$p.value
+			}
+		}
+
+		if (is.null(best_fit)) {
+			stop("No HC noise_k candidate produced enough non-noise distances for a KS score.")
+		}
+
+		best_fit$noise$search <- list(
+			enabled = TRUE,
+			criterion = "matrix_ks",
+			grid = candidate_grid,
+			results = do.call(rbind, search_results),
+			selected_k = best_k,
+			ks_statistic = best_statistic,
+			ks_p_value = best_p_value
+		)
+		return(best_fit)
+	}
+
+	if (isTRUE(select_noise_k) && noise_type != "hc") {
+		stop("select_noise_k is only supported when noise_type = \"hc\".")
+	}
+
+	fit <- matrix_variate_noise_fit_impl(
+		x_list = x_list,
+		g = g,
+		noise_type = noise_type,
+		max_iter = max_iter,
+		tol = tol,
+		nstart = nstart,
+		noise_k = noise_k,
+		noise_jitter = noise_jitter,
+		noise_pi_init = noise_pi_init,
+		verbose = verbose
+	)
+
+	fit$noise$search <- list(
+		enabled = FALSE,
+		criterion = "matrix_ks",
+		selected_k = if (noise_type == "hc") noise_k else NA_real_
+	)
+	fit
+}
+
+#' @keywords internal
+matrix_noise_ks_score <- function(fit, x_list) {
+	keep_idx <- which(fit$cluster > 0)
+	if (length(keep_idx) < 2) {
+		return(list(statistic = Inf, p.value = NA_real_, n_used = length(keep_idx)))
+	}
+
+	distances <- vapply(keep_idx, function(i) {
+		component <- fit$cluster[i]
+		matrix_mahalanobis(
+			x = x_list[[i]],
+			mean_matrix = fit$M[[component]],
+			row_cov = fit$U[[component]],
+			col_cov = fit$V[[component]]
+		)
+	}, numeric(1))
+	distances <- distances[is.finite(distances)]
+	if (length(distances) < 2 || length(unique(distances)) < 2) {
+		return(list(statistic = Inf, p.value = NA_real_, n_used = length(distances)))
+	}
+
+	df <- nrow(x_list[[1]]) * ncol(x_list[[1]])
+	test <- tryCatch(
+		stats::ks.test(distances, "pchisq", df = df),
+		error = function(e) NULL
+	)
+	if (is.null(test)) {
+		return(list(statistic = Inf, p.value = NA_real_, n_used = length(distances)))
+	}
+
+	list(
+		statistic = unname(test$statistic),
+		p.value = unname(test$p.value),
+		n_used = length(distances)
+	)
+}
+
+matrix_variate_noise_fit_impl <- function(x_list, g,
+											 noise_type = c("hc", "br"),
+											 max_iter = 100,
+											 tol = 1e-06,
+											 nstart = 10,
+											 noise_k = 1e-04,
+											 noise_jitter = 1e-08,
+											 noise_pi_init = 0.05,
+											 verbose = FALSE) {
 	noise_type <- match.arg(noise_type)
 
 	n <- length(x_list)

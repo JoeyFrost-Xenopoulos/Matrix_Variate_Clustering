@@ -26,7 +26,7 @@ x_list <- c(x_list, contam)
 ### HC-noise
 
 ```{r}
-fit_hc <- matrix_variate_noise_fit(x_list, g = 2, noise_type = "hc", noise_k = 1e-06,
+fit_hc <- matrix_variate_noise_fit(x_list, g = 2, noise_type = "hc", select_noise_k = TRUE,
                                    nstart = 100, max_iter = 50, verbose = TRUE)
 
 cat('HC fit mixing proportions:\n')
