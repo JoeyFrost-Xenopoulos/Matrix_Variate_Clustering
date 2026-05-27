@@ -2,4 +2,3 @@
 
 export(matrix_variate_mixture_fit)
 export(matrix_variate_noise_fit)
-export(run_optimal_k_test_scheme)

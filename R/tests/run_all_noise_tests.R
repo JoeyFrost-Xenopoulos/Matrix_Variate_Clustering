@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Run all noise test simulations (Tomarchio + Viroli)
-# Usage: Rscript R/run_all_noise_tests.R
+# Usage: Rscript R/tests/run_all_noise_tests.R
 
 # Resolve project root from script location so this works from any working directory
 args <- commandArgs(trailingOnly = FALSE)
@@ -12,21 +12,37 @@ script_path <- if (length(file_arg) > 0) {
 }
 script_dir <- dirname(normalizePath(script_path, winslash = "/", mustWork = FALSE))
 
-project_root <- if (basename(script_dir) == "R") {
-  dirname(script_dir)
-} else if (dir.exists(file.path(script_dir, "R"))) {
-  script_dir
-} else if (dir.exists("R")) {
-  normalizePath(getwd(), winslash = "/", mustWork = TRUE)
-} else {
+find_project_root <- function(start_dir) {
+  current <- normalizePath(start_dir, winslash = "/", mustWork = FALSE)
+  for (i in seq_len(6)) {
+    if (dir.exists(file.path(current, "R"))) {
+      return(current)
+    }
+    if (basename(current) == "R" && file.exists(file.path(dirname(current), "DESCRIPTION"))) {
+      return(dirname(current))
+    }
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      break
+    }
+    current <- parent
+  }
+  NULL
+}
+
+project_root <- find_project_root(script_dir)
+if (is.null(project_root)) {
+  project_root <- if (dir.exists("R")) normalizePath(getwd(), winslash = "/", mustWork = TRUE) else NULL
+}
+if (is.null(project_root)) {
   stop("Could not locate project root containing R/ directory.")
 }
 
 setwd(project_root)
 
 # Source package R files (except this runner) so helpers are available
-r_files <- list.files(file.path(project_root, "R"), pattern = "\\.R$", full.names = TRUE)
-runner_path <- normalizePath(file.path(project_root, "R", "run_all_noise_tests.R"), winslash = "/", mustWork = FALSE)
+r_files <- list.files(file.path(project_root, "R"), pattern = "\\.R$", full.names = TRUE, recursive = TRUE)
+runner_path <- normalizePath(file.path(project_root, "R", "tests", "run_all_noise_tests.R"), winslash = "/", mustWork = FALSE)
 helpers <- setdiff(r_files, runner_path)
 for (f in helpers) {
   tryCatch(source(f), error = function(e) stop("Error sourcing ", f, ": ", conditionMessage(e)))
