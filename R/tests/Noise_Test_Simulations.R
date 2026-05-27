@@ -88,8 +88,14 @@ two_group_accuracy <- function(pred, truth) {
 	max(acc1, acc2)
 }
 
-run_tomarchio_noise_simulation <- function(N_sim = 100, n = 200, contam_n = 0, verbose = TRUE) {
-	metrics <- vector("list", N_sim * 2)
+run_tomarchio_noise_simulation <- function(N_sim = 100, n = 200, contam_n = 0, verbose = TRUE,
+											 methods = c("hc", "br")) {
+	methods <- unique(tolower(methods))
+	if (length(methods) == 0 || any(!methods %in% c("hc", "br"))) {
+		stop("methods must be a non-empty subset of c('hc', 'br').")
+	}
+
+	metrics <- vector("list", N_sim * length(methods))
 	metric_idx <- 1
 
 	for (sim in seq_len(N_sim)) {
@@ -114,7 +120,7 @@ run_tomarchio_noise_simulation <- function(N_sim = 100, n = 200, contam_n = 0, v
 			dataset$contam_cols <- integer(0)
 		}
 
-		for (method in c("hc", "br")) {
+		for (method in methods) {
 			if (method == "hc") {
 				fit <- matrix_variate_noise_fit(
 					x_list = dataset$X,
@@ -289,8 +295,14 @@ best_three_group_accuracy <- function(pred, truth) {
 	max(sapply(perms, function(perm) mean(perm[pred_keep] == truth_keep)))
 }
 
-run_viroli_noise_simulation <- function(N_sim = 100, n = 300, contam_n = 0, verbose = TRUE) {
-	results <- vector("list", N_sim * 2)
+run_viroli_noise_simulation <- function(N_sim = 100, n = 300, contam_n = 0, verbose = TRUE,
+										 methods = c("hc", "br")) {
+	methods <- unique(tolower(methods))
+	if (length(methods) == 0 || any(!methods %in% c("hc", "br"))) {
+		stop("methods must be a non-empty subset of c('hc', 'br').")
+	}
+
+	results <- vector("list", N_sim * length(methods))
 	result_idx <- 1
 
 	for (sim in seq_len(N_sim)) {
@@ -307,7 +319,7 @@ run_viroli_noise_simulation <- function(N_sim = 100, n = 300, contam_n = 0, verb
 			dataset$contam_idx <- integer(0)
 		}
 
-		for (method in c("hc", "br")) {
+		for (method in methods) {
 			if (method == "hc") {
 				fit <- matrix_variate_noise_fit(
 					x_list = dataset$X,
