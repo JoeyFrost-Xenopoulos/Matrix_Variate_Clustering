@@ -2,37 +2,57 @@
 # Run all noise test simulations (Tomarchio + Viroli)
 # Usage: Rscript R/run_all_noise_tests.R
 
-# Ensure we're in project root where R/ exists
-if (!dir.exists("R")) stop("R/ directory not found. Run this script from the project root.")
+# Resolve project root from script location so this works from any working directory
+args <- commandArgs(trailingOnly = FALSE)
+file_arg <- grep("^--file=", args, value = TRUE)
+script_path <- if (length(file_arg) > 0) {
+  sub("^--file=", "", file_arg[1])
+} else {
+  "run_all_noise_tests.R"
+}
+script_dir <- dirname(normalizePath(script_path, winslash = "/", mustWork = FALSE))
+
+project_root <- if (basename(script_dir) == "R") {
+  dirname(script_dir)
+} else if (dir.exists(file.path(script_dir, "R"))) {
+  script_dir
+} else if (dir.exists("R")) {
+  normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+} else {
+  stop("Could not locate project root containing R/ directory.")
+}
+
+setwd(project_root)
 
 # Source package R files (except this runner) so helpers are available
-r_files <- list.files(pattern = "\\.R$", full.names = TRUE)
-runner_path <- normalizePath("run_all_noise_tests.R", winslash = "/", mustWork = FALSE)
+r_files <- list.files(file.path(project_root, "R"), pattern = "\\.R$", full.names = TRUE)
+runner_path <- normalizePath(file.path(project_root, "R", "run_all_noise_tests.R"), winslash = "/", mustWork = FALSE)
 helpers <- setdiff(r_files, runner_path)
 for (f in helpers) {
   tryCatch(source(f), error = function(e) stop("Error sourcing ", f, ": ", conditionMessage(e)))
 }
 
 # Ensure temp directory exists
-if (!dir.exists("temp")) dir.create("temp")
+temp_dir <- file.path(project_root, "temp")
+if (!dir.exists(temp_dir)) dir.create(temp_dir)
 
 cat("Starting all noise simulations...\n")
 
 cat("1) Tomarchio — Clean (N_sim=50, n=100)\n")
 tom_clean <- run_tomarchio_noise_simulation(N_sim = 50, n = 100, contam_n = 0, verbose = TRUE)
-saveRDS(tom_clean, file = "temp/tomarchio_noise_clean.rds")
+saveRDS(tom_clean, file = file.path(temp_dir, "tomarchio_noise_clean.rds"))
 
 cat("2) Tomarchio — Contaminated (N_sim=10, n=100, contam_n=30)\n")
 tom_contam <- run_tomarchio_noise_simulation(N_sim = 10, n = 100, contam_n = 30, verbose = TRUE)
-saveRDS(tom_contam, file = "temp/tomarchio_noise_contam.rds")
+saveRDS(tom_contam, file = file.path(temp_dir, "tomarchio_noise_contam.rds"))
 
 cat("3) Viroli — Clean (N_sim=10, n=100)\n")
 viro_clean <- run_viroli_noise_simulation(N_sim = 10, n = 100, contam_n = 0, verbose = TRUE)
-saveRDS(viro_clean, file = "temp/viroli_noise_clean.rds")
+saveRDS(viro_clean, file = file.path(temp_dir, "viroli_noise_clean.rds"))
 
 cat("4) Viroli — Contaminated (N_sim=10, n=30, contam_n=15)\n")
 viro_contam <- run_viroli_noise_simulation(N_sim = 10, n = 30, contam_n = 15, verbose = TRUE)
-saveRDS(viro_contam, file = "temp/viroli_noise_contam.rds")
+saveRDS(viro_contam, file = file.path(temp_dir, "viroli_noise_contam.rds"))
 
 # Combine summaries
 scenario_summary <- function(results, model_name, scenario_name) {
@@ -54,7 +74,7 @@ final_noise_summary <- rbind(
 )
 
 print(final_noise_summary)
-write.csv(final_noise_summary, file = "temp/final_noise_summary.csv", row.names = FALSE)
+write.csv(final_noise_summary, file = file.path(temp_dir, "final_noise_summary.csv"), row.names = FALSE)
 
 # Save all results
 saveRDS(list(
@@ -63,6 +83,6 @@ saveRDS(list(
   viroli_clean = viro_clean,
   viroli_contam = viro_contam,
   final_summary = final_noise_summary
-), file = "temp/all_noise_results.rds")
+), file = file.path(temp_dir, "all_noise_results.rds"))
 
 cat("All simulations complete. Results saved to temp/\n")
