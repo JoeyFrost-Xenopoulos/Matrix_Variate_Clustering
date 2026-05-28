@@ -1,6 +1,6 @@
-![Sticker](data/mde_icon_2.png)
+# AMPH
 
-## Matrix-Variate Mixture Models with Noise
+<img src="data/mde_icon_2.png" align="right" width="140" alt="Drifloon hex sticker" />
 
 This repository contains R code for fitting matrix-variate Gaussian mixture
 models with an explicit background noise component (HC — Hennig–Coretto and
