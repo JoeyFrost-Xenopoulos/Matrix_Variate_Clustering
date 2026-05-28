@@ -1,4 +1,6 @@
-# MASTERS — Matrix-Variate Mixture Models with Noise
+![Sticker](temp/mde_icon_2.png)
+
+## Matrix-Variate Mixture Models with Noise
 
 This repository contains R code for fitting matrix-variate Gaussian mixture
 models with an explicit background noise component (HC — Hennig–Coretto and
