@@ -1,4 +1,4 @@
-![Sticker](temp/mde_icon_2.png)
+![Sticker](data/mde_icon_2.png)
 
 ## Matrix-Variate Mixture Models with Noise
 
