@@ -106,96 +106,6 @@ matrix_variate_log_density <- function(x, mean_matrix, row_cov, col_cov) {
 	-0.5 * (r * p * log(2 * pi) + p * row_logdet + r * col_logdet + trace_form)
 }
 
-#' K-Means Initialization for Matrix Mixture Models
-#'
-#' Initializes parameters for the EM algorithm using k-means clustering on
-#' vectorized matrices. This provides reasonable starting values for mixing
-#' proportions, component means, and covariance matrices.
-#'
-#' @param x_list A list of numeric matrices, each of dimension r × p
-#' @param g Integer: number of mixture components
-#' @param nstart Integer: number of k-means restarts (default: 10)
-#'
-#' @return A list containing:
-#' - `pi`: numeric vector of length g with mixing proportions.
-#' - `M`: list of g component mean matrices.
-#' - `U`: list of g row covariance matrices.
-#' - `V`: list of g column covariance matrices.
-#' - `cluster`: integer vector with initial cluster assignments.
-#'
-#' @details
-#' The initialization procedure:
-#' 1. Vectorizes all matrix observations (matrix becomes a row vector)
-#' 2. Applies k-means clustering on the vectorized data
-#' 3. For each cluster, computes sample mean matrix and empirical covariances
-#' 4. Enforces identifiability constraint: tr(U) = r by scaling U and V
-#'
-#' The identifiability constraint resolves the scale ambiguity between U and V:
-#' if k > 0, then (1/k)U and kV yield the same distribution as U and V.
-#' We enforce tr(U) = r (trace of row covariance equals row dimension).
-#'
-#' @keywords internal
-matrix_mixture_kmeans_init <- function(x_list, g, nstart = 10) {
-	# Extract dimensions
-	n <- length(x_list)
-	r <- nrow(x_list[[1]])
-	p <- ncol(x_list[[1]])
-
-	# vectorize and run kmeans for init
-	x_matrix <- do.call(rbind, lapply(x_list, function(x) as.vector(x)))
-	km <- kmeans(x_matrix, centers = g, nstart = nstart)
-	z <- km$cluster
-
-	mixing_proportions <- numeric(g)
-	mean_matrices <- vector("list", g)
-	row_covariances <- vector("list", g)
-	col_covariances <- vector("list", g)
-
-	# For each component, compute sample mean and covariances from k-means clusters
-	for (component in seq_len(g)) {
-		component_index <- which(z == component)
-		if (length(component_index) == 0) {
-			component_index <- sample.int(n, 1)  # Fallback if k-means created empty cluster
-		}
-
-		component_data <- x_list[component_index]
-		mixing_proportions[component] <- length(component_index) / n
-		# Calculates M_hat
-		mean_matrices[[component]] <- Reduce(`+`, component_data) / length(component_data)
-
-		# M-step for the covariance U and V
-		row_cov <- matrix(0, r, r)
-		col_cov <- matrix(0, p, p)
-		for (x in component_data) {
-			centered <- x - mean_matrices[[component]]
-			row_cov <- row_cov + centered %*% t(centered)
-			col_cov <- col_cov + t(centered) %*% centered
-		}
-
-		row_cov <- row_cov / (p * length(component_data))
-		col_cov <- col_cov / (r * length(component_data))
-		row_cov <- make_spd(row_cov)
-		col_cov <- make_spd(col_cov)
-
-		# Enforce identifiability scale so that tr(U) = r
-		row_covariances[[component]] <- row_cov
-		col_covariances[[component]] <- col_cov
-		row_scale <- r / sum(diag(row_covariances[[component]]))
-		row_covariances[[component]] <- row_covariances[[component]] * row_scale
-		col_covariances[[component]] <- col_covariances[[component]] / row_scale
-		row_covariances[[component]] <- make_spd(row_covariances[[component]])
-		col_covariances[[component]] <- make_spd(col_covariances[[component]])
-	}
-
-	list(
-		pi = mixing_proportions,
-		M = mean_matrices,
-		U = row_covariances,
-		V = col_covariances,
-		cluster = z
-	)
-}
-
 #' Fit Matrix-Variate Gaussian Mixture Model via EM Algorithm
 #'
 #' Estimates parameters of a matrix-variate Gaussian mixture model (MGMM)
@@ -253,29 +163,15 @@ matrix_mixture_kmeans_init <- function(x_list, g, nstart = 10) {
 #' @export
 matrix_variate_mixture_fit <- function(x_list, g, max_iter = 100, tol = 1e-06,
 																			 nstart = 10, verbose = FALSE) {
-	if (!is.list(x_list) || length(x_list) == 0) {
-		stop("x_list must be a non-empty list of matrices.")
-	}
-
+	x_list <- matrix_validate_x_list(x_list)
 	n <- length(x_list)
 	r <- nrow(x_list[[1]])
 	p <- ncol(x_list[[1]])
-
-	for (x in x_list) {
-		if (!is.matrix(x) || nrow(x) != r || ncol(x) != p) {
-			stop("All elements of x_list must be matrices with the same dimensions.")
-		}
-	}
 
 	# Initialize parameters using k-means
 	params <- matrix_mixture_kmeans_init(x_list, g = g, nstart = nstart)
 	loglik_trace <- numeric(0)
 	responsibilities <- matrix(0, n, g)  # Will hold posterior probabilities P(z_ig = 1 | X_i)
-
-	log_sum_exp <- function(values) {
-		max_value <- max(values)
-		max_value + log(sum(exp(values - max_value)))
-	}
 
 	# EM loop
 	for (iteration in seq_len(max_iter)) {
@@ -298,12 +194,12 @@ matrix_variate_mixture_fit <- function(x_list, g, max_iter = 100, tol = 1e-06,
 		# Normalize log-densities to get responsibilities
 		for (i in seq_len(n)) {
 			row_log_densities <- log_density[i, ]
-			normalizer <- log_sum_exp(row_log_densities)  # numerically stable log-sum-exp
+			normalizer <- matrix_log_sum_exp(row_log_densities)  # numerically stable log-sum-exp
 			responsibilities[i, ] <- exp(row_log_densities - normalizer)  # z_hat_ig
 		}
 
 		# Compute observed data log-likelihood for convergence check
-		current_loglik <- sum(apply(log_density, 1, log_sum_exp))
+		current_loglik <- sum(apply(log_density, 1, matrix_log_sum_exp))
 		loglik_trace <- c(loglik_trace, current_loglik)
 
 		# Check convergence
