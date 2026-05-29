@@ -16,6 +16,8 @@ matrix_variate_noise_fit(
   noise_k_grid = 10^seq(-8, -1, length.out = 15),
   noise_jitter = 1e-08,
   noise_pi_init = 0.05,
+  use_parallel = FALSE,
+  n_cores = NULL,
   verbose = FALSE
 )
 }
@@ -49,6 +51,12 @@ convex-hull support.}
 
 \item{noise_pi_init}{Numeric: initial mixing proportion for the noise
 component.}
+
+\item{use_parallel}{Logical: if \code{TRUE}, evaluate HC candidate noise heights
+in parallel during selection.}
+
+\item{n_cores}{Integer: number of worker processes to use when
+\code{use_parallel = TRUE}.}
 
 \item{verbose}{Logical: print iteration progress.}
 }

@@ -13,13 +13,15 @@
 #' @return A fitted model with an added `fit$noise$search` summary.
 #' @keywords internal
 matrix_noise_hc_select_fit <- function(x_list, g,
-                                       max_iter = 100,
-                                       tol = 1e-06,
-                                       nstart = 10,
-                                       noise_k_grid = 10^seq(-8, -1, length.out = 15),
-                                       noise_jitter = 1e-08,
-                                       noise_pi_init = 0.05,
-                                       verbose = FALSE) {
+									   max_iter = 100,
+									   tol = 1e-06,
+									   nstart = 10,
+									   noise_k_grid = 10^seq(-8, -1, length.out = 15),
+									   noise_jitter = 1e-08,
+									   noise_pi_init = 0.05,
+									   verbose = FALSE,
+									   use_parallel = FALSE,
+									   n_cores = NULL) {
 	sanitize_noise_grid <- function(values) {
 		values <- as.numeric(values)
 		zero_idx <- is.finite(values) & values == 0
@@ -58,73 +60,153 @@ matrix_noise_hc_select_fit <- function(x_list, g,
 		round_fallback_n_used <- -Inf
 		round_fallback_loglik <- -Inf
 
-		for (candidate_k in round_grid) {
-			candidate_key <- format(candidate_k, scientific = TRUE, digits = 16)
-			seen_keys <- c(seen_keys, candidate_key)
-			if (verbose) {
-				message(sprintf("Checking HC noise_k = %.4e", candidate_k))
+		# Evaluate candidates serially or in parallel
+		if (isTRUE(use_parallel) && length(round_grid) > 1L) {
+			cores <- if (is.null(n_cores)) parallel::detectCores(logical = FALSE) else as.integer(n_cores)
+			cores <- max(1L, min(length(round_grid), cores))
+			cl <- parallel::makeCluster(cores)
+			# Export required objects and functions to workers
+			parallel::clusterExport(cl, varlist = c(
+				"matrix_variate_noise_fit_impl", "matrix_noise_ks_score",
+				"x_list", "g", "max_iter", "tol", "nstart",
+				"noise_jitter", "noise_pi_init", "verbose"
+			), envir = environment())
+			candidate_results <- parallel::parLapply(cl, round_grid, function(candidate_k) {
+				candidate_fit <- matrix_variate_noise_fit_impl(
+					x_list = x_list,
+					g = g,
+					noise_type = "hc",
+					max_iter = max_iter,
+					tol = tol,
+					nstart = nstart,
+					noise_k = candidate_k,
+					noise_jitter = noise_jitter,
+					noise_pi_init = noise_pi_init,
+					verbose = verbose
+				)
+				score <- matrix_noise_ks_score(candidate_fit, x_list)
+				list(candidate_k = candidate_k, fit = candidate_fit, score = score)
+			})
+			parallel::stopCluster(cl)
+			# Process results in the same order
+			for (res in candidate_results) {
+				candidate_k <- res$candidate_k
+				candidate_key <- format(candidate_k, scientific = TRUE, digits = 16)
+				seen_keys <- c(seen_keys, candidate_key)
+				if (verbose) message(sprintf("Checking HC noise_k = %.4e", candidate_k))
+				candidate_fit <- res$fit
+				score <- res$score
+				search_results[[length(search_results) + 1L]] <- data.frame(
+					round = round_idx,
+					noise_k = candidate_k,
+					ks_statistic = score$statistic,
+					ks_p_value = score$p.value,
+					n_used = score$n_used,
+					logLik = if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_,
+					converged = candidate_fit$converged,
+					stringsAsFactors = FALSE
+				)
+				candidate_loglik <- if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_
+				if (is.finite(score$n_used) && (
+					score$n_used > fallback_n_used ||
+					(score$n_used == fallback_n_used && is.finite(candidate_loglik) && candidate_loglik > fallback_loglik)
+				)) {
+					fallback_fit <- candidate_fit
+					fallback_k <- candidate_k
+					fallback_n_used <- score$n_used
+					fallback_loglik <- candidate_loglik
+				}
+				if (is.finite(score$n_used) && (
+					score$n_used > round_fallback_n_used ||
+					(score$n_used == round_fallback_n_used && is.finite(candidate_loglik) && candidate_loglik > round_fallback_loglik)
+				)) {
+					round_fallback_k <- candidate_k
+					round_fallback_n_used <- score$n_used
+					round_fallback_loglik <- candidate_loglik
+				}
+				if (is.finite(score$statistic) && (
+					score$statistic < best_statistic ||
+					(identical(score$statistic, best_statistic) && (!is.finite(best_p_value) || score$p.value > best_p_value))
+				)) {
+					best_fit <- candidate_fit
+					best_k <- candidate_k
+					best_statistic <- score$statistic
+					best_p_value <- score$p.value
+				}
+				if (is.finite(score$statistic) && (
+					score$statistic < round_best_statistic ||
+					(identical(score$statistic, round_best_statistic) && (!is.finite(round_best_p_value) || score$p.value > round_best_p_value))
+				)) {
+					round_best_k <- candidate_k
+					round_best_statistic <- score$statistic
+					round_best_p_value <- score$p.value
+				}
 			}
-			candidate_fit <- matrix_variate_noise_fit_impl(
-				x_list = x_list,
-				g = g,
-				noise_type = "hc",
-				max_iter = max_iter,
-				tol = tol,
-				nstart = nstart,
-				noise_k = candidate_k,
-				noise_jitter = noise_jitter,
-				noise_pi_init = noise_pi_init,
-				verbose = verbose
-			)
-			score <- matrix_noise_ks_score(candidate_fit, x_list)
-			search_results[[length(search_results) + 1L]] <- data.frame(
-				round = round_idx,
-				noise_k = candidate_k,
-				ks_statistic = score$statistic,
-				ks_p_value = score$p.value,
-				n_used = score$n_used,
-				logLik = if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_,
-				converged = candidate_fit$converged,
-				stringsAsFactors = FALSE
-			)
-
-			candidate_loglik <- if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_
-			if (is.finite(score$n_used) && (
-				score$n_used > fallback_n_used ||
-				(score$n_used == fallback_n_used && is.finite(candidate_loglik) && candidate_loglik > fallback_loglik)
-			)) {
-				fallback_fit <- candidate_fit
-				fallback_k <- candidate_k
-				fallback_n_used <- score$n_used
-				fallback_loglik <- candidate_loglik
-			}
-
-			if (is.finite(score$n_used) && (
-				score$n_used > round_fallback_n_used ||
-				(score$n_used == round_fallback_n_used && is.finite(candidate_loglik) && candidate_loglik > round_fallback_loglik)
-			)) {
-				round_fallback_k <- candidate_k
-				round_fallback_n_used <- score$n_used
-				round_fallback_loglik <- candidate_loglik
-			}
-
-			if (is.finite(score$statistic) && (
-				score$statistic < best_statistic ||
-				(identical(score$statistic, best_statistic) && (!is.finite(best_p_value) || score$p.value > best_p_value))
-			)) {
-				best_fit <- candidate_fit
-				best_k <- candidate_k
-				best_statistic <- score$statistic
-				best_p_value <- score$p.value
-			}
-
-			if (is.finite(score$statistic) && (
-				score$statistic < round_best_statistic ||
-				(identical(score$statistic, round_best_statistic) && (!is.finite(round_best_p_value) || score$p.value > round_best_p_value))
-			)) {
-				round_best_k <- candidate_k
-				round_best_statistic <- score$statistic
-				round_best_p_value <- score$p.value
+		} else {
+			for (candidate_k in round_grid) {
+				candidate_key <- format(candidate_k, scientific = TRUE, digits = 16)
+				seen_keys <- c(seen_keys, candidate_key)
+				if (verbose) {
+					message(sprintf("Checking HC noise_k = %.4e", candidate_k))
+				}
+				candidate_fit <- matrix_variate_noise_fit_impl(
+					x_list = x_list,
+					g = g,
+					noise_type = "hc",
+					max_iter = max_iter,
+					tol = tol,
+					nstart = nstart,
+					noise_k = candidate_k,
+					noise_jitter = noise_jitter,
+					noise_pi_init = noise_pi_init,
+					verbose = verbose
+				)
+				score <- matrix_noise_ks_score(candidate_fit, x_list)
+				search_results[[length(search_results) + 1L]] <- data.frame(
+					round = round_idx,
+					noise_k = candidate_k,
+					ks_statistic = score$statistic,
+					ks_p_value = score$p.value,
+					n_used = score$n_used,
+					logLik = if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_,
+					converged = candidate_fit$converged,
+					stringsAsFactors = FALSE
+				)
+				candidate_loglik <- if (length(candidate_fit$logLik) > 0) tail(candidate_fit$logLik, 1) else NA_real_
+				if (is.finite(score$n_used) && (
+					score$n_used > fallback_n_used ||
+					(score$n_used == fallback_n_used && is.finite(candidate_loglik) && candidate_loglik > fallback_loglik)
+				)) {
+					fallback_fit <- candidate_fit
+					fallback_k <- candidate_k
+					fallback_n_used <- score$n_used
+					fallback_loglik <- candidate_loglik
+				}
+				if (is.finite(score$n_used) && (
+					score$n_used > round_fallback_n_used ||
+					(score$n_used == round_fallback_n_used && is.finite(candidate_loglik) && candidate_loglik > round_fallback_loglik)
+				)) {
+					round_fallback_k <- candidate_k
+					round_fallback_n_used <- score$n_used
+					round_fallback_loglik <- candidate_loglik
+				}
+				if (is.finite(score$statistic) && (
+					score$statistic < best_statistic ||
+					(identical(score$statistic, best_statistic) && (!is.finite(best_p_value) || score$p.value > best_p_value))
+				)) {
+					best_fit <- candidate_fit
+					best_k <- candidate_k
+					best_statistic <- score$statistic
+					best_p_value <- score$p.value
+				}
+				if (is.finite(score$statistic) && (
+					score$statistic < round_best_statistic ||
+					(identical(score$statistic, round_best_statistic) && (!is.finite(round_best_p_value) || score$p.value > round_best_p_value))
+				)) {
+					round_best_k <- candidate_k
+					round_best_statistic <- score$statistic
+					round_best_p_value <- score$p.value
+				}
 			}
 		}
 
