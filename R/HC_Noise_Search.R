@@ -20,7 +20,19 @@ matrix_noise_hc_select_fit <- function(x_list, g,
                                        noise_jitter = 1e-08,
                                        noise_pi_init = 0.05,
                                        verbose = FALSE) {
+	sanitize_noise_grid <- function(values) {
+		values <- as.numeric(values)
+		zero_idx <- is.finite(values) & values == 0
+		values[zero_idx] <- .Machine$double.xmin
+		values <- values[is.finite(values) & values > 0]
+		sort(unique(values))
+	}
+
 	candidate_grid <- matrix_noise_hc_search_grid(noise_k_grid = noise_k_grid, x_list = x_list)
+	candidate_grid <- sanitize_noise_grid(candidate_grid)
+	if (length(candidate_grid) == 0) {
+		stop("HC noise_k selection failed: candidate grid has no finite positive values after sanitization.")
+	}
 	search_results <- list()
 	best_fit <- NULL
 	best_k <- NA_real_
@@ -108,9 +120,16 @@ matrix_noise_hc_select_fit <- function(x_list, g,
 			stop("HC noise_k selection failed: no candidate fit could be retained.")
 		}
 
+		candidate_grid <- sanitize_noise_grid(candidate_grid)
+		if (length(candidate_grid) == 0) {
+			break
+		}
+
 		current_min <- min(candidate_grid)
 		current_max <- max(candidate_grid)
-		current_span <- diff(range(log10(candidate_grid)))
+		log10_grid <- log10(candidate_grid)
+		log10_grid <- log10_grid[is.finite(log10_grid)]
+		current_span <- if (length(log10_grid) > 0) diff(range(log10_grid)) else NA_real_
 		if (!is.finite(current_span) || current_span <= 0) {
 			current_span <- 1
 		}
@@ -126,6 +145,9 @@ matrix_noise_hc_select_fit <- function(x_list, g,
 		if (identical(best_k, current_min)) {
 			lower_log10 <- log10(current_min) - current_span
 			upper_log10 <- log10(current_min)
+			if (!is.finite(lower_log10) || !is.finite(upper_log10)) {
+				break
+			}
 			candidate_grid <- sort(unique(c(
 				candidate_grid,
 				10^seq(lower_log10, upper_log10, length.out = max(9L, length(candidate_grid)))
@@ -133,6 +155,9 @@ matrix_noise_hc_select_fit <- function(x_list, g,
 		} else if (identical(best_k, current_max)) {
 			lower_log10 <- log10(current_max)
 			upper_log10 <- log10(current_max) + current_span
+			if (!is.finite(lower_log10) || !is.finite(upper_log10)) {
+				break
+			}
 			candidate_grid <- sort(unique(c(
 				candidate_grid,
 				10^seq(lower_log10, upper_log10, length.out = max(9L, length(candidate_grid)))
@@ -141,7 +166,7 @@ matrix_noise_hc_select_fit <- function(x_list, g,
 			break
 		}
 
-		candidate_grid <- candidate_grid[is.finite(candidate_grid) & candidate_grid > 0]
+		candidate_grid <- sanitize_noise_grid(candidate_grid)
 	}
 
 	best_fit$noise$search <- list(
@@ -203,8 +228,15 @@ matrix_noise_ks_score <- function(fit, x_list) {
 #' @return A sorted unique numeric vector of positive candidate noise heights.
 #' @keywords internal
 matrix_noise_hc_search_grid <- function(noise_k_grid, x_list) {
-	candidate_grid <- unique(as.numeric(noise_k_grid))
-	candidate_grid <- candidate_grid[is.finite(candidate_grid) & candidate_grid > 0]
+	sanitize_noise_grid <- function(values) {
+		values <- as.numeric(values)
+		zero_idx <- is.finite(values) & values == 0
+		values[zero_idx] <- .Machine$double.xmin
+		values <- values[is.finite(values) & values > 0]
+		sort(unique(values))
+	}
+
+	candidate_grid <- sanitize_noise_grid(noise_k_grid)
 	if (length(candidate_grid) == 0) {
 		stop("noise_k_grid must contain at least one positive finite value.")
 	}
@@ -215,9 +247,11 @@ matrix_noise_hc_search_grid <- function(noise_k_grid, x_list) {
 		half_width <- max(6, ceiling(dimension / 2))
 		lower_log10 <- max(log10(.Machine$double.xmin), center_log10 - half_width)
 		upper_log10 <- center_log10 + half_width
-		heuristic_grid <- 10^seq(lower_log10, upper_log10, length.out = max(9L, length(candidate_grid)))
-		candidate_grid <- c(candidate_grid, heuristic_grid)
+		if (is.finite(lower_log10) && is.finite(upper_log10)) {
+			heuristic_grid <- 10^seq(lower_log10, upper_log10, length.out = max(9L, length(candidate_grid)))
+			candidate_grid <- sanitize_noise_grid(c(candidate_grid, heuristic_grid))
+		}
 	}
 
-	sort(unique(candidate_grid))
+	sanitize_noise_grid(candidate_grid)
 }
