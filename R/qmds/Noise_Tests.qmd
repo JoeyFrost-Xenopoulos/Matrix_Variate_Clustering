@@ -26,6 +26,7 @@ x_list <- c(x_list, contam)
 ### HC-noise
 
 ```{r}
+library(Ampharos)
 fit_hc <- matrix_variate_noise_fit(x_list, g = 2, noise_type = "hc", select_noise_k = TRUE,
                                    nstart = 100, max_iter = 10, verbose = TRUE)
 
