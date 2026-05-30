@@ -1,12 +1,18 @@
 #!/usr/bin/env Rscript
 
-script_path <- tryCatch(normalizePath(sys.frame(1)$ofile, winslash = "/"), error = function(e) NA_character_)
-if (is.na(script_path) || !nzchar(script_path)) {
-	script_path <- normalizePath("scripts/compare_noise_k_loglik.R", winslash = "/")
+project_root <- normalizePath(getwd(), winslash = "/")
+if (!file.exists(file.path(project_root, "R", "Matrix.R"))) {
+	parent_root <- normalizePath(file.path(project_root, ".."), winslash = "/")
+	if (file.exists(file.path(parent_root, "R", "Matrix.R"))) {
+		project_root <- parent_root
+	} else {
+		stop("Could not locate the project root. Run this script from the project root or the scripts directory.")
+	}
 }
-project_root <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/")
 
 source(file.path(project_root, "R", "Matrix.R"))
+source(file.path(project_root, "R", "Matrix_Utils.R"))
+source(file.path(project_root, "R", "Matrix_Init.R"))
 source(file.path(project_root, "R", "HC_Noise_Search_Utils.R"))
 source(file.path(project_root, "R", "HC_Noise_Search.R"))
 source(file.path(project_root, "R", "Matrix_Noise.R"))
