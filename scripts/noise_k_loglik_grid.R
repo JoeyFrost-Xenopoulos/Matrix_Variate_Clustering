@@ -12,7 +12,7 @@ size_grid <- list(
 row_sd <- 0.5
 col_sd <- 0.5
 g <- 2
-n_grid <- 50
+n_grid <- 100
 fine_half_width_log10 <- 1
 fine_grid_n <- 31
 max_iter <- 100
