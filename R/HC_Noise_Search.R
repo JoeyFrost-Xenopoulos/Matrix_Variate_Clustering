@@ -16,19 +16,14 @@ matrix_noise_hc_select_fit <- function(x_list, g,
 									   max_iter = 100,
 									   tol = 1e-06,
 									   nstart = 10,
-									   noise_k_grid = 10^seq(-8, -1, length.out = 15),
+									   noise_k_grid = 10^seq(-8, -1, length.out = 50),
 									   noise_jitter = 1e-08,
 									   noise_pi_init = 0.05,
 									   verbose = FALSE,
 									   use_parallel = FALSE,
 									   n_cores = NULL) {
 	x_list <- matrix_validate_x_list(x_list)
-	if (isTRUE(use_parallel) && identical(.Platform$OS.type, "windows")) {
-		if (verbose) {
-			message("Parallel HC noise search is disabled on Windows in this session; falling back to serial evaluation.")
-		}
-		use_parallel <- FALSE
-	}
+
 	sanitize_noise_grid <- function(values) {
 		values <- as.numeric(values)
 		zero_idx <- is.finite(values) & values == 0
@@ -54,9 +49,11 @@ matrix_noise_hc_select_fit <- function(x_list, g,
 
 	candidate_grid <- matrix_noise_hc_search_grid(noise_k_grid = noise_k_grid, x_list = x_list)
 	candidate_grid <- sanitize_noise_grid(candidate_grid)
+	
 	if (length(candidate_grid) == 0) {
 		stop("HC noise_k selection failed: candidate grid has no finite positive values after sanitization.")
 	}
+
 	search_results <- list()
 	best_fit <- NULL
 	best_k <- NA_real_

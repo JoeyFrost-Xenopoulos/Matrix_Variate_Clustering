@@ -51,6 +51,10 @@ summary_results$size_label <- paste0(summary_results$nrow_matrix, " x ", summary
 summary_results$status <- factor(summary_results$status)
 ok_results <- summary_results[summary_results$status == "ok", , drop = FALSE]
 
+display_floor <- 10^-4
+ok_results$is_exact_zero_k <- ok_results$selected_k == 0
+ok_results$is_tiny_positive_k <- ok_results$selected_k > 0 & ok_results$selected_k < display_floor
+
 size_levels <- unique(summary_results$size_label)
 size_levels <- size_levels[order(match(size_levels, unique(summary_results$size_label)))]
 ok_results$size_label <- factor(ok_results$size_label, levels = size_levels)
@@ -94,6 +98,30 @@ contam_table <- aggregate(
 selected_k_by_contam <- aggregate(selected_k ~ size_label + n_contam, data = ok_results, FUN = median)
 selected_ks_by_contam <- aggregate(selected_ks ~ size_label + n_contam, data = ok_results, FUN = median)
 
+k_diagnostic_table <- do.call(
+	rbind,
+	lapply(split(ok_results, ok_results$size_label), function(df) {
+		positive_k <- df$selected_k[df$selected_k > 0]
+		min_positive_k <- if (length(positive_k) > 0) min(positive_k) else NA_real_
+		data.frame(
+			size = unique(df$size_label),
+			n_runs = nrow(df),
+			n_exact_zero = sum(df$is_exact_zero_k, na.rm = TRUE),
+			n_tiny_positive = sum(df$is_tiny_positive_k, na.rm = TRUE),
+			min_positive_k = min_positive_k,
+			min_positive_k_sci = if (is.finite(min_positive_k)) format(min_positive_k, scientific = TRUE, digits = 6) else NA_character_,
+			stringsAsFactors = FALSE
+		)
+	})
+)
+
+global_k_check <- data.frame(
+	n_total_ok = nrow(ok_results),
+	n_exact_zero = sum(ok_results$is_exact_zero_k, na.rm = TRUE),
+	n_tiny_positive = sum(ok_results$is_tiny_positive_k, na.rm = TRUE),
+	stringsAsFactors = FALSE
+)
+
 example_run <- ok_results[which.min(ok_results$selected_ks), , drop = FALSE]
 example_curve <- if (nrow(example_run) == 1 && file.exists(example_run$refined_curve_file)) {
 	read.csv(example_run$refined_curve_file, stringsAsFactors = FALSE)
@@ -132,6 +160,15 @@ kable(summary_table, digits = 4)
 kable(failure_table, digits = 4)
 ```
 
+### Selected k zero-vs-printing diagnostic
+
+This checks whether `selected_k` is exactly zero, or just very small positive and rounded to zero in printed tables.
+
+```{r}
+kable(global_k_check)
+kable(k_diagnostic_table, digits = 6)
+```
+
 ## Selected k by Contamination
 
 ```{r}
@@ -144,7 +181,7 @@ plot(
 	ylim = range(log10(selected_k_by_contam$selected_k)),
 	xlab = "Contamination count",
 	ylab = expression(log[10](selected[k])),
-	main = "Median selected k by contamination"
+	main = "Median selected k by contamination",
 )
 
 cols <- seq_along(size_levels)
@@ -154,7 +191,7 @@ for (i in seq_along(size_levels)) {
 	if (nrow(df_i) == 0) next
 	lines(df_i$n_contam, log10(df_i$selected_k), col = cols[i], lwd = 2, type = "b", pch = 19)
 }
-legend("topleft", legend = size_levels, col = cols, lty = 1, pch = 19, bty = "n")
+#legend("topleft", legend = size_levels, col = cols, lty = 1, pch = 19, bty = "n")
 ```
 
 ## KS Statistic by Contamination
@@ -175,6 +212,6 @@ for (i in seq_along(size_levels)) {
 	if (nrow(df_i) == 0) next
 	lines(df_i$n_contam, df_i$selected_ks, col = cols[i], lwd = 2, type = "b", pch = 19)
 }
-legend("topleft", legend = size_levels, col = cols, lty = 1, pch = 19, bty = "n")
+#legend("topleft", legend = size_levels, col = cols, lty = 1, pch = 19, bty = "n")
 ```
 
