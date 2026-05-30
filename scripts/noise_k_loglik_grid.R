@@ -133,8 +133,9 @@ for (size_idx in seq_along(size_grid)) {
       selected_k <- results$noise_k[selected_idx]
       selected_ks <- results$ks_statistic[selected_idx]
 
-      fine_lower <- max(.Machine$double.xmin, selected_k / (10^fine_half_width_log10))
-      fine_upper <- selected_k * (10^fine_half_width_log10)
+      fine_center_k <- selected_k
+      fine_lower <- max(.Machine$double.xmin, fine_center_k / (10^fine_half_width_log10))
+      fine_upper <- fine_center_k * (10^fine_half_width_log10)
       fine_noise_k_grid <- exp(seq(log(fine_lower), log(fine_upper), length.out = fine_grid_n))
 
       fine_results <- data.frame(
@@ -189,9 +190,6 @@ for (size_idx in seq_along(size_grid)) {
         fine_results$run_label <- run_label
         fine_results$grid_type <- "fine"
 
-        selected_k <- fine_selected_k
-        selected_ks <- fine_selected_ks
-
         results$selected <- FALSE
         results$selected[selected_idx] <- TRUE
         results$nrow_matrix <- r
@@ -235,8 +233,15 @@ for (size_idx in seq_along(size_grid)) {
           ylab = "KS statistic",
           main = plot_title
         )
-        points(fine_selected_k, fine_selected_ks, col = "red", pch = 19, cex = 1.4)
-        legend("topright", legend = "Selected k", col = "red", pch = 19, bty = "n")
+        points(fine_center_k, results$ks_statistic[selected_idx], col = "red", pch = 19, cex = 1.4)
+        points(fine_selected_k, fine_selected_ks, col = "darkorange", pch = 19, cex = 1.4)
+        legend(
+          "topright",
+          legend = c("Coarse center k", "Refined minimum k"),
+          col = c("red", "darkorange"),
+          pch = 19,
+          bty = "n"
+        )
         grid()
         grDevices::dev.off()
 
