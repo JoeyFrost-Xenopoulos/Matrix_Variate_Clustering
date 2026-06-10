@@ -1,4 +1,4 @@
-#' Matrix-Variate Noise Mixture Clustering
+#' Matrix-Variate Noise Mixture Clustering with Automatic K Selection
 #'
 #' Fits a matrix-variate Gaussian mixture model with a basic noise component.
 #' The noise component can be either Hennig-Coretto style improper constant
@@ -12,62 +12,146 @@
 #' @param tol Numeric: convergence tolerance on the log-likelihood trace.
 #' @param nstart Integer: number of k-means restarts for initialization.
 #' @param noise_k Numeric: constant noise height used when `noise_type = "hc"`.
-#' @param noise_jitter Numeric: retained for BR support construction.
+#'   If `estimate_k = TRUE`, this is ignored.
+#' @param estimate_k Logical: if TRUE, automatically select optimal noise_k
+#'   using KS goodness-of-fit test.
+#' @param k_grid Numeric vector: grid of k values to search over when
+#'   `estimate_k = TRUE`. If NULL, automatically generates dimension-aware grid.
+#' @param adaptive_grid Logical: if TRUE and k_grid is NULL, generate
+#'   dimension-aware heuristic grid based on matrix dimensions.
 #' @param noise_pi_init Numeric: initial mixing proportion for the noise
 #'   component.
 #' @param verbose Logical: print iteration progress.
 #'
 #' @return A list containing the fitted mixture parameters, posterior
-#'   responsibilities, log-likelihood trace, and a noise summary. The returned
-#'   responsibility matrix includes the noise component in the last column, and
-#'   `cluster` uses `0` for observations assigned to noise.
-#'
-#' @details
-#' The Gaussian components use the same matrix-variate normal updates as the
-#' base fitter in [matrix_variate_mixture_fit()]. The noise component is fixed
-#' during the M-step and only its mixing proportion is updated.
-#'
-#' @examples
-#' \\dontrun{
-#' set.seed(1)
-#' x_list <- list(
-#'   matrix(rnorm(12), 3, 4),
-#'   matrix(rnorm(12, mean = 2), 3, 4),
-#'   matrix(rnorm(12, mean = 8), 3, 4)
-#' )
-#'
-#' fit_hc <- matrix_variate_noise_fit(x_list, g = 2, noise_type = "hc")
-#' fit_br <- matrix_variate_noise_fit(x_list, g = 2, noise_type = "br")
-#' }
+#'   responsibilities, log-likelihood trace, and a noise summary. If
+#'   `estimate_k = TRUE`, also includes `k_grid` and `ks_scores`.
 #'
 #' @export
-
 matrix_variate_noise_fit <- function(x_list,
-									 g,
-									 noise_type = c("hc", "br"),
-									 max_iter = 1000,
-									 tol = 1e-06,
-									 nstart = 10,
-									 noise_k = 1e-04,
-									 noise_jitter = 1e-08,
-									 noise_pi_init = 0.05,
-									 verbose = FALSE) {
+                                     g,
+                                     noise_type = c("hc", "br"),
+                                     max_iter = 1000,
+                                     tol = 1e-06,
+                                     nstart = 100,
+                                     noise_k = 1e-04,
+                                     estimate_k = FALSE,
+                                     k_grid = NULL,
+                                     adaptive_grid = TRUE,
+                                     noise_pi_init = 0.05,
+                                     verbose = FALSE) {
   
-	noise_type <- match.arg(noise_type)
-	x_list <- matrix_validate_x_list(x_list)
-
-	matrix_variate_noise_fit_impl(
-		x_list = x_list,
-		g = g,
-		noise_type = noise_type,
-		max_iter = max_iter,
-		tol = tol,
-		nstart = nstart,
-		noise_k = noise_k,
-		noise_jitter = noise_jitter,
-		noise_pi_init = noise_pi_init,
-		verbose = verbose
-	)
+  noise_type <- match.arg(noise_type)
+  x_list <- matrix_validate_x_list(x_list)
+  
+  # If BR noise, k selection doesn't apply
+  if (noise_type == "br" && estimate_k) {
+    warning("estimate_k = TRUE is ignored for BR noise type (k is not a parameter)")
+    estimate_k <- FALSE
+  }
+  
+  # Automatic k selection for HC noise
+  if (noise_type == "hc" && estimate_k) {
+    if (verbose) cat("Selecting optimal k using KS test...\n")
+    
+    # Generate dimension-aware grid if not provided
+    if (is.null(k_grid)) {
+      if (adaptive_grid) {
+        k_grid <- matrix_noise_hc_heuristic_grid(x_list)
+        if (verbose) {
+          cat(sprintf("Using grid search: [%e, %e] with %d candidates\n",
+                      min(k_grid), max(k_grid), length(k_grid)))
+        }
+      } else {
+        # Default grid if adaptive_grid is FALSE and k_grid is NULL
+        k_grid <- 10^seq(-16, -1, length.out = 30)
+        if (verbose) cat("Using default fixed grid\n")
+      }
+    }
+    
+    ks_scores <- numeric(length(k_grid))
+    all_fits <- vector("list", length(k_grid))
+    all_ks_results <- vector("list", length(k_grid))
+    
+    for (i in seq_along(k_grid)) {
+      if (verbose) cat("  Testing k =", format(k_grid[i], scientific = TRUE), "... ")
+      
+      best_fit <- NULL
+      best_ks_stat <- Inf
+      best_ks_result <- NULL
+      
+      # Multiple restarts for each k
+      for (restart in seq_len(min(nstart, 10))) {  # Limit restarts for speed
+        fit <- matrix_variate_noise_fit_impl(
+          x_list = x_list,
+          g = g,
+          noise_type = "hc",
+          max_iter = max_iter,
+          tol = tol,
+          nstart = 1,  # Inner restarts handled here
+          noise_k = k_grid[i],
+          noise_jitter = NULL,
+          noise_pi_init = noise_pi_init,
+          verbose = FALSE
+        )
+        
+        # Score this fit using KS test
+        ks_result <- matrix_noise_ks_score(fit, x_list)
+        
+        # Lower KS statistic is better (closer to null distribution)
+        if (!is.na(ks_result$statistic) && ks_result$statistic < best_ks_stat) {
+          best_ks_stat <- ks_result$statistic
+          best_fit <- fit
+          best_ks_result <- ks_result
+        }
+      }
+      
+      ks_scores[i] <- best_ks_stat
+      all_fits[[i]] <- best_fit
+      all_ks_results[[i]] <- best_ks_result
+      
+      if (verbose) {
+        cat(sprintf("KS = %.4f (n_used = %d)\n", 
+                    best_ks_stat, best_ks_result$n_used))
+      }
+    }
+    
+    # Select k with minimum KS statistic
+    best_idx <- which.min(ks_scores)
+    selected_k <- k_grid[best_idx]
+    best_fit <- all_fits[[best_idx]]
+    
+    if (verbose) {
+      cat(sprintf("\nSelected optimal k = %e (KS statistic = %.4f, p-value = %.4f)\n",
+                  selected_k, ks_scores[best_idx], all_ks_results[[best_idx]]$p.value))
+    }
+    
+    # Add selection info to result
+    best_fit$k_selection <- list(
+      selected_k = selected_k,
+      k_grid = k_grid,
+      ks_scores = ks_scores,
+      ks_pvalues = sapply(all_ks_results, function(x) x$p.value),
+      n_used = sapply(all_ks_results, function(x) x$n_used),
+      adaptive_grid = adaptive_grid
+    )
+    
+    return(best_fit)
+  }
+  
+  # Standard fitting (no automatic selection)
+  matrix_variate_noise_fit_impl(
+    x_list = x_list,
+    g = g,
+    noise_type = noise_type,
+    max_iter = max_iter,
+    tol = tol,
+    nstart = nstart,
+    noise_k = noise_k,
+    noise_jitter = NULL,
+    noise_pi_init = noise_pi_init,
+    verbose = verbose
+  )
 }
 
 matrix_variate_noise_fit_impl <- function(x_list, g,
