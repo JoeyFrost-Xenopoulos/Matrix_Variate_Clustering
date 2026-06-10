@@ -2,11 +2,111 @@
 # Comprehensive testing framework for adaptive k selection in matrix-variate noise clustering
 
 library(ggplot2)
-library(corrplot)
 library(reshape2)
+library(dplyr)
 
-# Source your original functions (adjust path as needed)
-# source("matrix_variate_noise_functions.R")
+# Try to load mclust for ARI, but don't fail if not available
+if (!require(mclust, quietly = TRUE)) {
+  warning("mclust package not available. ARI calculations will return NA.")
+  # Provide a fallback
+  adjustedRandIndex <- function(x, y) {
+    return(NA)
+  }
+}
+
+#' Source all necessary R scripts for the matrix-variate noise clustering
+#'
+#' @param script_dir Directory containing the R scripts. If NULL, assumes scripts
+#'   are in the current working directory.
+#' @return Logical indicating success
+source_all_scripts <- function(script_dir = NULL) {
+  
+  # List of required script files in order of dependencies
+  script_files <- c(
+    "matrix_validation_helpers.R",  # Basic validation functions
+    "matrix_utility_functions.R",   # Utility functions (log_sum_exp, make_spd, etc.)
+    "matrix_mahalanobis.R",         # Mahalanobis distance for matrix-variate
+    "matrix_variate_density.R",     # Matrix-variate normal density
+    "matrix_mixture_init.R",        # K-means initialization
+    "matrix_noise_components.R",    # Noise component functions (HC, BR, KS test)
+    "matrix_variate_noise_fit.R"    # Main fitting function
+  )
+  
+  # If script_dir is provided, prepend it to file paths
+  if (!is.null(script_dir)) {
+    script_files <- file.path(script_dir, script_files)
+  }
+  
+  # Source each script
+  for (script in script_files) {
+    if (file.exists(script)) {
+      cat(sprintf("Sourcing: %s\n", basename(script)))
+      tryCatch({
+        source(script)
+      }, error = function(e) {
+        stop(sprintf("Error sourcing %s: %s\n", script, e$message))
+      })
+    } else {
+      # Try to find alternative location or define inline
+      cat(sprintf("Warning: %s not found. Looking for alternative...\n", script))
+      
+      # Look for any R file in current directory that might contain the functions
+      r_files <- list.files(pattern = "\\.R$")
+      if (length(r_files) > 0) {
+        cat(sprintf("Found %d R files. Attempting to source all...\n", length(r_files)))
+        for (rf in r_files) {
+          cat(sprintf("  Sourcing: %s\n", rf))
+          tryCatch({
+            source(rf)
+          }, error = function(e) {
+            cat(sprintf("    Warning: %s\n", e$message))
+          })
+        }
+      } else {
+        stop("No R script files found. Please ensure the algorithm scripts are in the working directory.")
+      }
+      break  # Stop trying individual files once we source all
+    }
+  }
+  
+  # Verify key functions are available
+  required_functions <- c(
+    "matrix_variate_noise_fit",
+    "matrix_validate_x_list",
+    "matrix_log_sum_exp",
+    "matrix_variate_log_density"
+  )
+  
+  missing_functions <- required_functions[!sapply(required_functions, exists)]
+  
+  if (length(missing_functions) > 0) {
+    stop(sprintf("Missing required functions: %s\n", 
+                 paste(missing_functions, collapse = ", ")))
+  }
+  
+  cat("All required functions loaded successfully!\n")
+  return(TRUE)
+}
+
+# If the original functions are in a single file, you can source that instead
+# source("matrix_variate_noise_clustering.R")  # Uncomment and adjust path as needed
+
+# Otherwise, source all individual scripts
+# Try to source from current directory or specify the correct path
+if (!exists("matrix_variate_noise_fit")) {
+  cat("Loading matrix-variate noise clustering functions...\n")
+  
+  # Option 1: If all functions are in one file
+  if (file.exists("matrix_variate_noise_clustering.R")) {
+    source("matrix_variate_noise_clustering.R")
+  } 
+  # Option 2: If functions are split across multiple files
+  else {
+    # Try to source from a specific directory (change this to your actual path)
+    script_dir <- getwd()  # or e.g., "./R" or "../R"
+    source_all_scripts(script_dir)
+  }
+}
 
 #' Generate synthetic matrix-variate data with known structure
 #'
@@ -147,9 +247,15 @@ evaluate_clustering <- function(fit, truth) {
   pred_noise <- predicted == 0
   
   noise_accuracy <- sum(true_noise == pred_noise) / n
-  noise_precision <- sum(pred_noise & true_noise) / sum(pred_noise)
-  noise_recall <- sum(pred_noise & true_noise) / sum(true_noise)
-  noise_f1 <- 2 * noise_precision * noise_recall / (noise_precision + noise_recall)
+  noise_precision <- ifelse(sum(pred_noise) > 0, 
+                            sum(pred_noise & true_noise) / sum(pred_noise), 
+                            0)
+  noise_recall <- ifelse(sum(true_noise) > 0,
+                         sum(pred_noise & true_noise) / sum(true_noise),
+                         0)
+  noise_f1 <- ifelse(noise_precision + noise_recall > 0,
+                     2 * noise_precision * noise_recall / (noise_precision + noise_recall),
+                     0)
   
   # 2. Group parsing metrics (only for non-noise points)
   clean_idx <- truth > 0
@@ -167,20 +273,24 @@ evaluate_clustering <- function(fit, truth) {
     n_groups_found <- length(unique(pred_clean[pred_clean > 0]))
     
     # Group purity
-    group_purity <- 0
-    for (g in unique(pred_clean)) {
-      if (g > 0) {
-        mask <- pred_clean == g
-        if (sum(mask) > 0) {
-          true_in_group <- truth_clean[mask]
-          if (length(unique(true_in_group)) > 0) {
-            majority <- max(table(true_in_group))
-            group_purity <- group_purity + majority / sum(mask)
+    if (n_groups_found > 0) {
+      group_purity <- 0
+      for (g in unique(pred_clean)) {
+        if (g > 0) {
+          mask <- pred_clean == g
+          if (sum(mask) > 0) {
+            true_in_group <- truth_clean[mask]
+            if (length(unique(true_in_group)) > 0) {
+              majority <- max(table(true_in_group))
+              group_purity <- group_purity + majority / sum(mask)
+            }
           }
         }
       }
+      group_purity <- group_purity / n_groups_found
+    } else {
+      group_purity <- NA
     }
-    group_purity <- group_purity / n_groups_found
   } else {
     ari <- NA
     n_groups_found <- 0
@@ -311,6 +421,13 @@ run_adaptive_k_tests <- function(test_configs, n_replicates = 10) {
           selected_k = if (!is.null(eval$k_selection)) eval$k_selection$selected_k else NA,
           ks_best = if (!is.null(eval$k_selection)) eval$k_selection$best_ks else NA
         )
+        
+        cat(sprintf("    Replicate %d: F1=%.3f, ARI=%.3f, Groups=%d, k=%.2e\n",
+                    rep, eval$noise_identification$f1, 
+                    ifelse(is.na(eval$group_parsing$ari), 0, eval$group_parsing$ari),
+                    eval$group_parsing$n_groups_found,
+                    if (!is.null(eval$k_selection)) eval$k_selection$selected_k else config$noise_k))
+        
       }, error = function(e) {
         cat(sprintf("      Error in replicate %d: %s\n", rep, e$message))
         config_results[[rep]] <- NULL
@@ -325,14 +442,24 @@ run_adaptive_k_tests <- function(test_configs, n_replicates = 10) {
   }
   
   # Convert to data frame
-  results_df <- do.call(rbind, lapply(results, as.data.frame))
-  return(results_df)
+  if (length(results) > 0) {
+    results_df <- do.call(rbind, lapply(results, as.data.frame))
+    return(results_df)
+  } else {
+    warning("No successful results to return")
+    return(data.frame())
+  }
 }
 
 #' Visualize test results
 #'
 #' @param results_df Data frame from run_adaptive_k_tests
 visualize_results <- function(results_df) {
+  
+  if (nrow(results_df) == 0) {
+    cat("No results to visualize\n")
+    return()
+  }
   
   # 1. Noise identification performance
   p1 <- ggplot(results_df, aes(x = factor(noise_prop), y = noise_f1, fill = factor(adaptive_grid))) +
@@ -355,7 +482,7 @@ visualize_results <- function(results_df) {
   # 3. Number of groups found
   p3 <- ggplot(results_df, aes(x = factor(noise_prop), y = n_groups_found, fill = factor(adaptive_grid))) +
     geom_boxplot() +
-    geom_hline(aes(yintercept = n_groups_true, color = "True"), linetype = "dashed") +
+    geom_hline(aes(yintercept = unique(n_groups_true), color = "True"), linetype = "dashed") +
     facet_wrap(~ n_groups_true + dim_r + dim_p, labeller = label_both) +
     labs(title = "Number of Groups Found",
          x = "Noise Proportion", y = "Number of Groups",
@@ -372,20 +499,22 @@ visualize_results <- function(results_df) {
     theme_minimal()
   
   # 5. Selected k values (log scale)
-  p5 <- ggplot(results_df, aes(x = factor(noise_prop), y = log10(selected_k), fill = factor(adaptive_grid))) +
-    geom_boxplot() +
-    facet_wrap(~ n_groups_true + dim_r + dim_p, labeller = label_both) +
-    labs(title = "Selected k Values (log10 scale)",
-         x = "Noise Proportion", y = "log10(k)",
-         fill = "Adaptive Grid") +
-    theme_minimal()
+  if (any(!is.na(results_df$selected_k))) {
+    p5 <- ggplot(results_df, aes(x = factor(noise_prop), y = log10(selected_k), fill = factor(adaptive_grid))) +
+      geom_boxplot() +
+      facet_wrap(~ n_groups_true + dim_r + dim_p, labeller = label_both) +
+      labs(title = "Selected k Values (log10 scale)",
+           x = "Noise Proportion", y = "log10(k)",
+           fill = "Adaptive Grid") +
+      theme_minimal()
+    print(p5)
+  }
   
   # Print plots
   print(p1)
   print(p2)
   print(p3)
   print(p4)
-  print(p5)
   
   # Summary statistics
   cat("\n", paste(rep("=", 80), collapse = ""), "\n")
@@ -413,6 +542,21 @@ visualize_results <- function(results_df) {
 
 #' Main execution function
 main <- function() {
+  
+  # Check if required packages are installed
+  required_packages <- c("ggplot2", "reshape2", "dplyr", "mclust")
+  missing_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly = TRUE)]
+  
+  if (length(missing_packages) > 0) {
+    cat("Installing missing packages:", paste(missing_packages, collapse = ", "), "\n")
+    install.packages(missing_packages)
+  }
+  
+  # Load required packages
+  library(ggplot2)
+  library(reshape2)
+  library(dplyr)
+  library(mclust)
   
   # Define test configurations
   # Varying: dimensions, number of groups, sample sizes, noise proportions
@@ -494,20 +638,24 @@ main <- function() {
   results <- run_adaptive_k_tests(test_configs, n_replicates = 5)  # Reduced replicates for demo
   
   # Save results
-  timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  results_file <- paste0("adaptive_k_test_results_", timestamp, ".csv")
-  write.csv(results, results_file, row.names = FALSE)
-  cat(sprintf("\nResults saved to: %s\n", results_file))
-  
-  # Visualize
-  cat("\nGenerating visualizations...\n")
-  pdf(paste0("adaptive_k_visualization_", timestamp, ".pdf"), width = 12, height = 8)
-  visualize_results(results)
-  dev.off()
-  cat("Visualizations saved to PDF\n")
-  
-  # Return results for further analysis
-  invisible(results)
+  if (nrow(results) > 0) {
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    results_file <- paste0("adaptive_k_test_results_", timestamp, ".csv")
+    write.csv(results, results_file, row.names = FALSE)
+    cat(sprintf("\nResults saved to: %s\n", results_file))
+    
+    # Visualize
+    cat("\nGenerating visualizations...\n")
+    pdf(paste0("adaptive_k_visualization_", timestamp, ".pdf"), width = 12, height = 8)
+    visualize_results(results)
+    dev.off()
+    cat("Visualizations saved to PDF\n")
+    
+    # Return results for further analysis
+    invisible(results)
+  } else {
+    cat("\nNo results were generated. Please check the errors above.\n")
+  }
 }
 
 # Run the tests
