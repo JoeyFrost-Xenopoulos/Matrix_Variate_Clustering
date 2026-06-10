@@ -48,29 +48,57 @@ generate_test_data <- function(n_per_group, rows, cols,
   list(x_list = x_list, true_labels = true_labels)
 }
 
-# Save edge case results to CSV
+# Save edge case results to CSV - FIXED VERSION
 save_edge_results <- function(results_list, filename) {
   if (length(results_list) == 0) {
     cat("No results to save\n")
     return(NULL)
   }
   
-  df <- do.call(rbind, lapply(results_list, function(x) {
-    data.frame(
-      test_case = x$test_case,
-      success = x$success,
-      noise_proportion = ifelse(is.na(x$noise_proportion), 0, x$noise_proportion),
-      iterations = ifelse(is.na(x$iterations), 0, x$iterations),
-      converged = x$converged,
-      selected_k = ifelse(is.na(x$selected_k), 0, x$selected_k),
-      message = x$message,
+  # Filter out NULL or invalid entries
+  valid_results <- list()
+  for (i in seq_along(results_list)) {
+    if (!is.null(results_list[[i]]) && length(results_list[[i]]) > 0) {
+      # Check if required fields exist
+      if (!is.null(results_list[[i]]$test_case)) {
+        valid_results[[length(valid_results) + 1]] <- results_list[[i]]
+      }
+    }
+  }
+  
+  if (length(valid_results) == 0) {
+    cat("No valid results to save\n")
+    return(NULL)
+  }
+  
+  # Build data frame row by row to avoid errors
+  df_rows <- list()
+  for (i in seq_along(valid_results)) {
+    x <- valid_results[[i]]
+    row <- data.frame(
+      test_case = ifelse(is.null(x$test_case), "unknown", x$test_case),
+      success = ifelse(is.null(x$success), FALSE, x$success),
+      noise_proportion = ifelse(is.null(x$noise_proportion), 0, as.numeric(x$noise_proportion)),
+      iterations = ifelse(is.null(x$iterations), 0, as.integer(x$iterations)),
+      converged = ifelse(is.null(x$converged), FALSE, x$converged),
+      selected_k = ifelse(is.null(x$selected_k), 0, as.numeric(x$selected_k)),
+      message = ifelse(is.null(x$message), "", as.character(x$message)),
       stringsAsFactors = FALSE
     )
-  }))
+    df_rows[[i]] <- row
+  }
   
-  write.csv(df, filename, row.names = FALSE)
-  cat("Edge case results saved to:", filename, "\n")
-  return(df)
+  # Combine all rows
+  if (length(df_rows) > 0) {
+    final_df <- do.call(rbind, df_rows)
+    write.csv(final_df, filename, row.names = FALSE)
+    cat("Edge case results saved to:", filename, "\n")
+    cat("  Saved", nrow(final_df), "results\n")
+    return(final_df)
+  } else {
+    cat("No data frames created\n")
+    return(NULL)
+  }
 }
 
 cat("\n========================================\n")
@@ -118,7 +146,7 @@ for (dims in small_dims) {
   })
   
   test_name <- paste0("small_", rows, "x", cols)
-  if (!is.null(result)) {
+  if (!is.null(result) && !is.null(result$noise)) {
     cat("  ✓ Converged:", result$converged, "\n")
     cat("  ✓ Iterations:", result$iterations, "\n")
     cat("  ✓ Noise proportion:", result$noise$pi, "\n")
@@ -133,6 +161,7 @@ for (dims in small_dims) {
       message = "Success"
     )
   } else {
+    cat("  ✗ Test failed\n")
     edge_results[[test_name]] <- list(
       test_case = test_name,
       success = FALSE,
@@ -140,7 +169,7 @@ for (dims in small_dims) {
       iterations = NA,
       converged = FALSE,
       selected_k = NA,
-      message = "Failed to converge"
+      message = "Failed to converge or NULL result"
     )
   }
 }
@@ -180,8 +209,8 @@ result <- tryCatch({
   return(NULL)
 })
 
-if (!is.null(result)) {
-  noise_detected <- sum(result$cluster == 0)
+if (!is.null(result) && !is.null(result$noise)) {
+  noise_detected <- sum(result$cluster == 0, na.rm = TRUE)
   cat("✓ Noise points detected:", noise_detected, "out of", n_noise, "\n")
   cat("✓ Noise proportion:", result$noise$pi, "\n")
   
@@ -195,6 +224,7 @@ if (!is.null(result)) {
     message = paste("Detected", noise_detected, "/", n_noise, "noise points")
   )
 } else {
+  cat("✗ Test failed\n")
   edge_results[["single_cluster"]] <- list(
     test_case = "single_cluster",
     success = FALSE,
@@ -235,9 +265,9 @@ result <- tryCatch({
   return(NULL)
 })
 
-if (!is.null(result)) {
+if (!is.null(result) && !is.null(result$noise)) {
   cat("✓ Noise proportion:", result$noise$pi, "\n")
-  cat("✓ Points assigned to noise:", sum(result$cluster == 0), "out of", n_total, "\n")
+  cat("✓ Points assigned to noise:", sum(result$cluster == 0, na.rm = TRUE), "out of", n_total, "\n")
   
   edge_results[["pure_noise"]] <- list(
     test_case = "pure_noise",
@@ -246,9 +276,10 @@ if (!is.null(result)) {
     iterations = result$iterations,
     converged = result$converged,
     selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
-    message = paste("Assigned", sum(result$cluster == 0), "/", n_total, "to noise")
+    message = paste("Assigned", sum(result$cluster == 0, na.rm = TRUE), "/", n_total, "to noise")
   )
 } else {
+  cat("✗ Test failed\n")
   edge_results[["pure_noise"]] <- list(
     test_case = "pure_noise",
     success = FALSE,
@@ -301,7 +332,7 @@ result <- tryCatch({
   return(NULL)
 })
 
-if (!is.null(result)) {
+if (!is.null(result) && !is.null(result$noise)) {
   cat("✓ Converged:", result$converged, "\n")
   cat("✓ Iterations:", result$iterations, "\n")
   cat("✓ Noise proportion:", result$noise$pi, "\n")
@@ -316,6 +347,7 @@ if (!is.null(result)) {
     message = if(result$converged) "Converged" else "Did not converge"
   )
 } else {
+  cat("✗ Test failed\n")
   edge_results[["high_dim"]] <- list(
     test_case = "high_dim",
     success = FALSE,
@@ -369,7 +401,7 @@ result <- tryCatch({
   return(NULL)
 })
 
-if (!is.null(result)) {
+if (!is.null(result) && !is.null(result$noise)) {
   cluster_sizes <- table(result$cluster[result$cluster > 0])
   cat("✓ Detected cluster sizes:", paste(cluster_sizes, collapse = ", "), "\n")
   cat("✓ Number of clusters found:", length(cluster_sizes), "\n")
@@ -384,6 +416,7 @@ if (!is.null(result)) {
     message = paste("Found", length(cluster_sizes), "clusters")
   )
 } else {
+  cat("✗ Test failed\n")
   edge_results[["unbalanced"]] <- list(
     test_case = "unbalanced",
     success = FALSE,
@@ -426,7 +459,7 @@ result_br <- tryCatch({
   return(NULL)
 })
 
-if (!is.null(result_br)) {
+if (!is.null(result_br) && !is.null(result_br$noise)) {
   cat("✓ BR noise - converged:", result_br$converged, "\n")
   cat("✓ BR noise - iterations:", result_br$iterations, "\n")
   cat("✓ BR noise - noise proportion:", result_br$noise$pi, "\n")
@@ -441,6 +474,7 @@ if (!is.null(result_br)) {
     message = "BR noise type test"
   )
 } else {
+  cat("✗ Test failed\n")
   edge_results[["br_noise"]] <- list(
     test_case = "br_noise",
     success = FALSE,
@@ -457,9 +491,13 @@ cat("\n--- Saving Edge Case Results ---\n")
 if (length(edge_results) > 0) {
   edge_df <- save_edge_results(edge_results, "edge_case_results.csv")
   
-  # Print summary
-  cat("\n--- Edge Case Summary ---\n")
-  print(edge_df)
+  if (!is.null(edge_df) && nrow(edge_df) > 0) {
+    # Print summary
+    cat("\n--- Edge Case Summary ---\n")
+    print(edge_df)
+  } else {
+    cat("No valid results to display\n")
+  }
 } else {
   cat("No results to save\n")
 }

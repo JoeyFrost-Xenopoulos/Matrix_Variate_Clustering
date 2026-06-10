@@ -52,7 +52,7 @@ generate_test_data <- function(n_per_group, rows, cols,
   list(x_list = x_list, true_labels = true_labels)
 }
 
-# Function to save results to CSV
+# Function to save results to CSV - FIXED VERSION
 save_results_to_csv <- function(results_list, filename) {
   # Convert results to data frame
   df <- data.frame(
@@ -69,18 +69,39 @@ save_results_to_csv <- function(results_list, filename) {
   for (name in names(results_list)) {
     result <- results_list[[name]]
     if (!is.null(result) && !is.null(result$k_selection)) {
-      # Handle potential list conversion for n_used
+      # Extract and convert ks_scores and ks_pvalues
       ks_scores <- result$k_selection$ks_scores
       ks_pvalues <- result$k_selection$ks_pvalues
       
+      # Convert to numeric vectors if they are lists
+      if (is.list(ks_scores)) {
+        ks_scores <- unlist(ks_scores)
+      }
+      if (is.list(ks_pvalues)) {
+        ks_pvalues <- unlist(ks_pvalues)
+      }
+      
+      # Calculate statistics
+      ks_stat <- if(length(ks_scores) > 0 && all(!is.na(ks_scores))) {
+        min(ks_scores, na.rm = TRUE)
+      } else {
+        NA
+      }
+      
+      ks_pval <- if(length(ks_pvalues) > 0 && all(!is.na(ks_pvalues))) {
+        max(ks_pvalues, na.rm = TRUE)
+      } else {
+        NA
+      }
+      
       df <- rbind(df, data.frame(
         test_name = name,
-        selected_k = result$k_selection$selected_k,
-        noise_proportion = result$noise$pi,
-        iterations = result$iterations,
-        converged = result$converged,
-        ks_statistic = if(length(ks_scores) > 0) min(ks_scores, na.rm = TRUE) else NA,
-        ks_pvalue = if(length(ks_pvalues) > 0) max(ks_pvalues, na.rm = TRUE) else NA,
+        selected_k = as.numeric(result$k_selection$selected_k),
+        noise_proportion = as.numeric(result$noise$pi),
+        iterations = as.integer(result$iterations),
+        converged = as.logical(result$converged),
+        ks_statistic = ks_stat,
+        ks_pvalue = ks_pval,
         stringsAsFactors = FALSE
       ))
     }
@@ -89,6 +110,7 @@ save_results_to_csv <- function(results_list, filename) {
   if (nrow(df) > 0) {
     write.csv(df, filename, row.names = FALSE)
     cat("Results saved to:", filename, "\n")
+    cat("  Saved", nrow(df), "results\n")
   } else {
     cat("No results to save to:", filename, "\n")
   }
@@ -104,7 +126,13 @@ save_grid_results <- function(result, filename) {
     ks_pvalues <- result$k_selection$ks_pvalues
     n_used_raw <- result$k_selection$n_used
     
-    # Convert n_used from list to numeric if necessary
+    # Convert from list to numeric if necessary
+    if (is.list(ks_scores)) {
+      ks_scores <- unlist(ks_scores)
+    }
+    if (is.list(ks_pvalues)) {
+      ks_pvalues <- unlist(ks_pvalues)
+    }
     if (is.list(n_used_raw)) {
       n_used <- unlist(n_used_raw)
     } else {
@@ -190,7 +218,10 @@ if (!is.null(result1)) {
   cat("\n--- Results for Test 1.1 ---\n")
   if (!is.null(result1$k_selection)) {
     cat("✓ Selected k:", result1$k_selection$selected_k, "\n")
-    cat("✓ KS scores range:", range(result1$k_selection$ks_scores, na.rm = TRUE), "\n")
+    # Handle list conversion for display
+    ks_scores <- result1$k_selection$ks_scores
+    if (is.list(ks_scores)) ks_scores <- unlist(ks_scores)
+    cat("✓ KS scores range:", range(ks_scores, na.rm = TRUE), "\n")
     cat("✓ Grid size:", length(result1$k_selection$k_grid), "\n")
     
     # Fix n_used if it's a list for display
@@ -321,9 +352,13 @@ cat("\n--- Saving Results ---\n")
 if (length(all_test_results) > 0) {
   results_df <- save_results_to_csv(all_test_results, "automatic_k_selection_results.csv")
   
-  # Create summary table
-  cat("\n--- Summary Table ---\n")
-  print(results_df)
+  if (!is.null(results_df) && nrow(results_df) > 0) {
+    # Create summary table
+    cat("\n--- Summary Table ---\n")
+    print(results_df)
+  } else {
+    cat("No results data frame created\n")
+  }
 } else {
   cat("No results to save\n")
 }
