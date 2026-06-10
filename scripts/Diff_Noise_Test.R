@@ -154,16 +154,21 @@ evaluate_fit <- function(result, true_labels, x_list) {
 
 # Save results to CSV
 save_noise_test_results <- function(results_list, filename) {
+  if (length(results_list) == 0) {
+    cat("No results to save\n")
+    return(NULL)
+  }
+  
   df <- do.call(rbind, lapply(results_list, function(x) {
     data.frame(
       pattern = x$pattern,
       ari = x$ari,
       noise_accuracy = x$noise_accuracy,
-      noise_precision = x$noise_precision,
-      noise_recall = x$noise_recall,
+      noise_precision = ifelse(is.na(x$noise_precision), 0, x$noise_precision),
+      noise_recall = ifelse(is.na(x$noise_recall), 0, x$noise_recall),
       noise_proportion_estimated = x$noise_proportion_estimated,
       noise_proportion_true = x$noise_proportion_true,
-      selected_k = x$selected_k,
+      selected_k = ifelse(is.na(x$selected_k), 0, x$selected_k),
       iterations = x$iterations,
       converged = x$converged,
       logLik = x$logLik,
@@ -241,7 +246,7 @@ test_noise_patterns <- function() {
       results[[pattern]] <- eval_result
       
       # Format selected k for display
-      selected_k_str <- if (!is.na(eval_result$selected_k)) 
+      selected_k_str <- if (!is.na(eval_result$selected_k) && eval_result$selected_k > 0) 
         sprintf("%.2e", eval_result$selected_k) else "N/A"
       
       cat(sprintf(" %10.3f %10.3f %10.3f %10.3f %10.3f %12s\n",

@@ -50,14 +50,19 @@ generate_test_data <- function(n_per_group, rows, cols,
 
 # Save edge case results to CSV
 save_edge_results <- function(results_list, filename) {
+  if (length(results_list) == 0) {
+    cat("No results to save\n")
+    return(NULL)
+  }
+  
   df <- do.call(rbind, lapply(results_list, function(x) {
     data.frame(
       test_case = x$test_case,
       success = x$success,
-      noise_proportion = x$noise_proportion,
-      iterations = x$iterations,
+      noise_proportion = ifelse(is.na(x$noise_proportion), 0, x$noise_proportion),
+      iterations = ifelse(is.na(x$iterations), 0, x$iterations),
       converged = x$converged,
-      selected_k = ifelse(is.null(x$selected_k), NA, x$selected_k),
+      selected_k = ifelse(is.na(x$selected_k), 0, x$selected_k),
       message = x$message,
       stringsAsFactors = FALSE
     )
@@ -80,7 +85,6 @@ cat("\n--- Test 3.1: Extremely small matrices ---\n")
 set.seed(1)
 
 small_dims <- list(c(1,1), c(2,1), c(1,2))
-edge_case_results <- list()
 
 for (dims in small_dims) {
   rows <- dims[1]
@@ -119,7 +123,7 @@ for (dims in small_dims) {
     cat("  ✓ Iterations:", result$iterations, "\n")
     cat("  ✓ Noise proportion:", result$noise$pi, "\n")
     
-    edge_case_results[[test_name]] <- list(
+    edge_results[[test_name]] <- list(
       test_case = test_name,
       success = TRUE,
       noise_proportion = result$noise$pi,
@@ -129,7 +133,7 @@ for (dims in small_dims) {
       message = "Success"
     )
   } else {
-    edge_case_results[[test_name]] <- list(
+    edge_results[[test_name]] <- list(
       test_case = test_name,
       success = FALSE,
       noise_proportion = NA,
@@ -161,29 +165,46 @@ for (i in 1:n_noise) {
   x_list[[n_clean + i]] <- matrix(runif(rows * cols, -5, 5), rows, cols)
 }
 
-result <- matrix_variate_noise_fit(
-  x_list = x_list,
-  g = 1,
-  noise_type = "hc",
-  max_iter = 150,
-  nstart = 10,
-  estimate_k = TRUE,
-  verbose = FALSE
-)
+result <- tryCatch({
+  matrix_variate_noise_fit(
+    x_list = x_list,
+    g = 1,
+    noise_type = "hc",
+    max_iter = 150,
+    nstart = 10,
+    estimate_k = TRUE,
+    verbose = FALSE
+  )
+}, error = function(e) {
+  cat("Error:", e$message, "\n")
+  return(NULL)
+})
 
-noise_detected <- sum(result$cluster == 0)
-cat("✓ Noise points detected:", noise_detected, "out of", n_noise, "\n")
-cat("✓ Noise proportion:", result$noise$pi, "\n")
-
-edge_case_results[["single_cluster"]] <- list(
-  test_case = "single_cluster",
-  success = TRUE,
-  noise_proportion = result$noise$pi,
-  iterations = result$iterations,
-  converged = result$converged,
-  selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
-  message = paste("Detected", noise_detected, "/", n_noise, "noise points")
-)
+if (!is.null(result)) {
+  noise_detected <- sum(result$cluster == 0)
+  cat("✓ Noise points detected:", noise_detected, "out of", n_noise, "\n")
+  cat("✓ Noise proportion:", result$noise$pi, "\n")
+  
+  edge_results[["single_cluster"]] <- list(
+    test_case = "single_cluster",
+    success = TRUE,
+    noise_proportion = result$noise$pi,
+    iterations = result$iterations,
+    converged = result$converged,
+    selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
+    message = paste("Detected", noise_detected, "/", n_noise, "noise points")
+  )
+} else {
+  edge_results[["single_cluster"]] <- list(
+    test_case = "single_cluster",
+    success = FALSE,
+    noise_proportion = NA,
+    iterations = NA,
+    converged = FALSE,
+    selected_k = NA,
+    message = "Test failed"
+  )
+}
 
 # Edge Case 3: All points are noise
 cat("\n--- Test 3.3: All points are noise ---\n")
@@ -199,28 +220,45 @@ for (i in 1:n_total) {
   x_list[[i]] <- matrix(runif(rows * cols, -10, 10), rows, cols)
 }
 
-result <- matrix_variate_noise_fit(
-  x_list = x_list,
-  g = 2,
-  noise_type = "hc",
-  max_iter = 100,
-  nstart = 5,
-  estimate_k = TRUE,
-  verbose = FALSE
-)
+result <- tryCatch({
+  matrix_variate_noise_fit(
+    x_list = x_list,
+    g = 2,
+    noise_type = "hc",
+    max_iter = 100,
+    nstart = 5,
+    estimate_k = TRUE,
+    verbose = FALSE
+  )
+}, error = function(e) {
+  cat("Error:", e$message, "\n")
+  return(NULL)
+})
 
-cat("✓ Noise proportion:", result$noise$pi, "\n")
-cat("✓ Points assigned to noise:", sum(result$cluster == 0), "out of", n_total, "\n")
-
-edge_case_results[["pure_noise"]] <- list(
-  test_case = "pure_noise",
-  success = TRUE,
-  noise_proportion = result$noise$pi,
-  iterations = result$iterations,
-  converged = result$converged,
-  selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
-  message = paste("Assigned", sum(result$cluster == 0), "/", n_total, "to noise")
-)
+if (!is.null(result)) {
+  cat("✓ Noise proportion:", result$noise$pi, "\n")
+  cat("✓ Points assigned to noise:", sum(result$cluster == 0), "out of", n_total, "\n")
+  
+  edge_results[["pure_noise"]] <- list(
+    test_case = "pure_noise",
+    success = TRUE,
+    noise_proportion = result$noise$pi,
+    iterations = result$iterations,
+    converged = result$converged,
+    selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
+    message = paste("Assigned", sum(result$cluster == 0), "/", n_total, "to noise")
+  )
+} else {
+  edge_results[["pure_noise"]] <- list(
+    test_case = "pure_noise",
+    success = FALSE,
+    noise_proportion = NA,
+    iterations = NA,
+    converged = FALSE,
+    selected_k = NA,
+    message = "Test failed"
+  )
+}
 
 # Edge Case 4: High dimensional data
 cat("\n--- Test 3.4: High dimensional matrices (10x10) ---\n")
@@ -248,29 +286,46 @@ for (i in 1:5) {
   idx <- idx + 1
 }
 
-result <- matrix_variate_noise_fit(
-  x_list = x_list,
-  g = g,
-  noise_type = "hc",
-  max_iter = 200,
-  nstart = 5,
-  estimate_k = TRUE,
-  verbose = FALSE
-)
+result <- tryCatch({
+  matrix_variate_noise_fit(
+    x_list = x_list,
+    g = g,
+    noise_type = "hc",
+    max_iter = 200,
+    nstart = 5,
+    estimate_k = TRUE,
+    verbose = FALSE
+  )
+}, error = function(e) {
+  cat("Error:", e$message, "\n")
+  return(NULL)
+})
 
-cat("✓ Converged:", result$converged, "\n")
-cat("✓ Iterations:", result$iterations, "\n")
-cat("✓ Noise proportion:", result$noise$pi, "\n")
-
-edge_case_results[["high_dim"]] <- list(
-  test_case = "high_dim",
-  success = result$converged,
-  noise_proportion = result$noise$pi,
-  iterations = result$iterations,
-  converged = result$converged,
-  selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
-  message = if(result$converged) "Converged" else "Did not converge"
-)
+if (!is.null(result)) {
+  cat("✓ Converged:", result$converged, "\n")
+  cat("✓ Iterations:", result$iterations, "\n")
+  cat("✓ Noise proportion:", result$noise$pi, "\n")
+  
+  edge_results[["high_dim"]] <- list(
+    test_case = "high_dim",
+    success = result$converged,
+    noise_proportion = result$noise$pi,
+    iterations = result$iterations,
+    converged = result$converged,
+    selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
+    message = if(result$converged) "Converged" else "Did not converge"
+  )
+} else {
+  edge_results[["high_dim"]] <- list(
+    test_case = "high_dim",
+    success = FALSE,
+    noise_proportion = NA,
+    iterations = NA,
+    converged = FALSE,
+    selected_k = NA,
+    message = "Test failed"
+  )
+}
 
 # Edge Case 5: Extremely unbalanced groups
 cat("\n--- Test 3.5: Extremely unbalanced group sizes ---\n")
@@ -299,29 +354,46 @@ test_data <- generate_test_data(
   noise_prop = 0
 )
 
-result <- matrix_variate_noise_fit(
-  x_list = test_data$x_list,
-  g = g,
-  noise_type = "hc",
-  max_iter = 150,
-  nstart = 20,
-  estimate_k = TRUE,
-  verbose = FALSE
-)
+result <- tryCatch({
+  matrix_variate_noise_fit(
+    x_list = test_data$x_list,
+    g = g,
+    noise_type = "hc",
+    max_iter = 150,
+    nstart = 20,
+    estimate_k = TRUE,
+    verbose = FALSE
+  )
+}, error = function(e) {
+  cat("Error:", e$message, "\n")
+  return(NULL)
+})
 
-cluster_sizes <- table(result$cluster[result$cluster > 0])
-cat("✓ Detected cluster sizes:", paste(cluster_sizes, collapse = ", "), "\n")
-cat("✓ Number of clusters found:", length(cluster_sizes), "\n")
-
-edge_case_results[["unbalanced"]] <- list(
-  test_case = "unbalanced",
-  success = TRUE,
-  noise_proportion = result$noise$pi,
-  iterations = result$iterations,
-  converged = result$converged,
-  selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
-  message = paste("Found", length(cluster_sizes), "clusters")
-)
+if (!is.null(result)) {
+  cluster_sizes <- table(result$cluster[result$cluster > 0])
+  cat("✓ Detected cluster sizes:", paste(cluster_sizes, collapse = ", "), "\n")
+  cat("✓ Number of clusters found:", length(cluster_sizes), "\n")
+  
+  edge_results[["unbalanced"]] <- list(
+    test_case = "unbalanced",
+    success = TRUE,
+    noise_proportion = result$noise$pi,
+    iterations = result$iterations,
+    converged = result$converged,
+    selected_k = if (!is.null(result$k_selection)) result$k_selection$selected_k else NA,
+    message = paste("Found", length(cluster_sizes), "clusters")
+  )
+} else {
+  edge_results[["unbalanced"]] <- list(
+    test_case = "unbalanced",
+    success = FALSE,
+    noise_proportion = NA,
+    iterations = NA,
+    converged = FALSE,
+    selected_k = NA,
+    message = "Test failed"
+  )
+}
 
 # Edge Case 6: BR noise type
 cat("\n--- Test 3.6: BR noise type ---\n")
@@ -340,35 +412,56 @@ for (i in 21:40) {
   x_list[[i]] <- matrix(rnorm(rows * cols, 5, 1), rows, cols)
 }
 
-result_br <- matrix_variate_noise_fit(
-  x_list = x_list,
-  g = g,
-  noise_type = "br",
-  max_iter = 150,
-  nstart = 10,
-  verbose = FALSE
-)
+result_br <- tryCatch({
+  matrix_variate_noise_fit(
+    x_list = x_list,
+    g = g,
+    noise_type = "br",
+    max_iter = 150,
+    nstart = 10,
+    verbose = FALSE
+  )
+}, error = function(e) {
+  cat("Error:", e$message, "\n")
+  return(NULL)
+})
 
-cat("✓ BR noise - converged:", result_br$converged, "\n")
-cat("✓ BR noise - iterations:", result_br$iterations, "\n")
-cat("✓ BR noise - noise proportion:", result_br$noise$pi, "\n")
-
-edge_case_results[["br_noise"]] <- list(
-  test_case = "br_noise",
-  success = result_br$converged,
-  noise_proportion = result_br$noise$pi,
-  iterations = result_br$iterations,
-  converged = result_br$converged,
-  selected_k = NA,  # BR doesn't use k
-  message = "BR noise type test"
-)
+if (!is.null(result_br)) {
+  cat("✓ BR noise - converged:", result_br$converged, "\n")
+  cat("✓ BR noise - iterations:", result_br$iterations, "\n")
+  cat("✓ BR noise - noise proportion:", result_br$noise$pi, "\n")
+  
+  edge_results[["br_noise"]] <- list(
+    test_case = "br_noise",
+    success = result_br$converged,
+    noise_proportion = result_br$noise$pi,
+    iterations = result_br$iterations,
+    converged = result_br$converged,
+    selected_k = NA,  # BR doesn't use k
+    message = "BR noise type test"
+  )
+} else {
+  edge_results[["br_noise"]] <- list(
+    test_case = "br_noise",
+    success = FALSE,
+    noise_proportion = NA,
+    iterations = NA,
+    converged = FALSE,
+    selected_k = NA,
+    message = "Test failed"
+  )
+}
 
 # Save all edge case results
 cat("\n--- Saving Edge Case Results ---\n")
-edge_df <- save_edge_results(edge_case_results, "edge_case_results.csv")
-
-# Print summary
-cat("\n--- Edge Case Summary ---\n")
-print(edge_df)
+if (length(edge_results) > 0) {
+  edge_df <- save_edge_results(edge_results, "edge_case_results.csv")
+  
+  # Print summary
+  cat("\n--- Edge Case Summary ---\n")
+  print(edge_df)
+} else {
+  cat("No results to save\n")
+}
 
 cat("\n=== Edge Case Testing Complete ===\n")
