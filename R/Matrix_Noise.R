@@ -52,6 +52,7 @@ matrix_variate_noise_fit <- function(x_list,
 									 noise_jitter = 1e-08,
 									 noise_pi_init = 0.05,
 									 verbose = FALSE) {
+  
 	noise_type <- match.arg(noise_type)
 	x_list <- matrix_validate_x_list(x_list)
 
