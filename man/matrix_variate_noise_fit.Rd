@@ -60,16 +60,3 @@ Fits a matrix-variate Gaussian mixture model with a basic noise component.
 The noise component can be either Hennig-Coretto style improper constant
 noise (\code{hc}) or Banfield-Raftery style bounded uniform noise (\code{br}).
 }
-\details{
-When \code{estimate_k = TRUE} and \code{noise_type = "hc"}, the optimal noise constant
-is selected by:
-\enumerate{
-\item For each candidate k, run an EM with the noise component.
-\item Filter out observations assigned to noise, and refit a proper
-g-component mixture on the remaining data (starting from the
-noise‑EM parameters).
-\item Score the refitted model with a Kolmogorov–Smirnov test on the
-Mahalanobis distances to the assigned Gaussian components.
-The k that minimises the KS statistic is chosen.
-}
-}

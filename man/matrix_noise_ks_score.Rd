@@ -2,23 +2,19 @@
 % Please edit documentation in R/Matrix_KS_Score.R
 \name{matrix_noise_ks_score}
 \alias{matrix_noise_ks_score}
-\title{Score a Refitted Proper Mixture with a Matrix KS Test (Chi-Square)}
+\title{Score HC Noise Fit with a Matrix KS Test (Chi-Square)}
 \usage{
 matrix_noise_ks_score(fit, x_list)
 }
 \arguments{
-\item{fit}{A fitted proper mixture (output of \code{matrix_variate_mixture_fit}).}
+\item{fit}{A fitted noise model.}
 
-\item{x_list}{The filtered list of matrices (no noise points) used for the refit.}
+\item{x_list}{List of matrices used for fitting.}
 }
 \value{
 A list with \code{statistic}, \code{p.value}, and \code{n_used}.
 }
 \description{
-After filtering out noise points and refitting a proper g-component
-matrix-variate Gaussian mixture, this function computes the Mahalanobis
-distance of each observation to its assigned component’s mean (using the
-corresponding covariance structures) and performs a one-sample Kolmogorov–
-Smirnov test against the chi-squared distribution with r×p degrees of freedom.
+Score HC Noise Fit with a Matrix KS Test (Chi-Square)
 }
 \keyword{internal}
