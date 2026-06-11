@@ -10,6 +10,7 @@ matrix_variate_mixture_fit(
   max_iter = 100,
   tol = 1e-06,
   nstart = 10,
+  init = NULL,
   verbose = FALSE
 )
 }
@@ -22,57 +23,17 @@ matrix_variate_mixture_fit(
 
 \item{tol}{Numeric: convergence tolerance for log-likelihood (default: 1e-6)}
 
-\item{nstart}{Integer: number of k-means restarts for initialization (default: 10)}
+\item{nstart}{Integer: number of k-means restarts for initialization (ignored if \code{init} provided)}
+
+\item{init}{Optional list with elements \code{pi}, \code{M}, \code{U}, \code{V} for custom initialisation.}
 
 \item{verbose}{Logical: print iteration progress (default: FALSE)}
 }
 \value{
-A list containing:
-\itemize{
-\item \code{pi}: numeric vector of length g with final mixing proportions.
-\item \code{M}: list of g final component mean matrices.
-\item \code{U}: list of g final row covariance matrices.
-\item \code{V}: list of g final column covariance matrices.
-\item \code{z}: numeric matrix (n × g) of posterior responsibilities.
-\item \code{cluster}: integer vector of length n with hard cluster assignments.
-\item \code{logLik}: numeric vector with the log-likelihood trace across iterations.
-\item \code{iterations}: number of EM iterations performed.
-\item \code{converged}: logical indicating whether the algorithm converged within \code{max_iter}.
-}
+A list containing fitted parameters, responsibilities, cluster assignments, etc.
 }
 \description{
 Estimates parameters of a matrix-variate Gaussian mixture model (MGMM)
-using the Expectation-Maximization algorithm. Performs clustering of
-matrix-valued observations while accounting for row and column dependencies.
-}
-\details{
-The EM algorithm alternates between:
-\strong{E-step:} Compute posterior responsibilities (soft cluster assignments)
-\strong{M-step:} Update parameters based on responsibilities
-}
-\examples{
-\dontrun{
-set.seed(123)
-mean_1 <- matrix(c(1.5, 1.2, 1.0, 1.3, 1.1, 1.4, 1.2, 1.0), nrow=2)
-mean_2 <- matrix(c(-1.4, -1.0, -1.2, -1.3, -1.1, -1.5, -1.0, -1.2), nrow=2)
-
-simulate_matrix_group <- function(n, mean_matrix, row_sd=0.35, col_sd=0.35) {
-  r <- nrow(mean_matrix); p <- ncol(mean_matrix)
-  row_cov <- diag(row_sd, r); col_cov <- diag(col_sd, p)
-  lapply(seq_len(n), function(i) {
-    noise <- matrix(rnorm(r*p), r, p)
-    mean_matrix + row_cov \%*\% noise \%*\% col_cov
-  })
-}
-
-x_list <- c(
-  simulate_matrix_group(15, mean_1),
-  simulate_matrix_group(15, mean_2)
-)
-
-fit <- matrix_variate_mixture_fit(x_list, g=2, max_iter=50, verbose=TRUE)
-fit$cluster
-fit$pi
-}
-
+using the Expectation-Maximization algorithm. If \code{init} is provided,
+that initialisation is used instead of the default k‑means start.
 }
